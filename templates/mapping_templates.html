@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}매핑 템플릿 - DocMerge{% endblock %}
+{% block nav_templates %}active{% endblock %}
+{% block page_title %}매핑 템플릿{% endblock %}
+
+{% block content %}
+<div class="section-header mb-2">
+  <p class="text-muted">자주 사용하는 열 매핑 규칙을 템플릿으로 저장해 재사용할 수 있습니다.</p>
+  <button class="btn btn-primary" id="btn-new-template">+ 새 템플릿</button>
+</div>
+
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>이름</th>
+        <th>설명</th>
+        <th>매핑 수</th>
+        <th>생성일</th>
+        <th>작업</th>
+      </tr>
+    </thead>
+    <tbody id="templates-body">
+      <tr><td colspan="5" class="empty-state">로딩 중...</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function loadTemplates() {
+  try {
+    const data = await API.get('/api/documents/mapping-templates/');
+    const results = data.results || [];
+    const tbody = document.getElementById('templates-body');
+
+    if (results.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">저장된 템플릿이 없습니다.</td></tr>';
+    } else {
+      tbody.innerHTML = results.map(t => {
+        const mappingCount = t.column_mapping ? Object.keys(t.column_mapping).length : 0;
+        return `
+          <tr>
+            <td><strong>${escapeHtml(t.name)}</strong></td>
+            <td class="text-muted">${escapeHtml(t.description || '-')}</td>
+            <td>${mappingCount}개</td>
+            <td>${formatDate(t.created_at)}</td>
+            <td class="actions">
+              <button class="btn btn-xs btn-ghost" onclick="viewTemplate(${t.id})">보기</button>
+              <button class="btn btn-xs btn-danger" onclick="deleteTemplate(${t.id})">🗑</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+  } catch(err) {
+    showToast('템플릿을 불러올 수 없습니다', 'error');
+  }
+}
+
+async function viewTemplate(id) {
+  try {
+    const t = await API.get(`/api/documents/mapping-templates/${id}/`);
+    const mapping = t.column_mapping || {};
+    const dateCols = t.date_columns || [];
+    const numberCols = t.number_columns || [];
+
+    let mappingRows = Object.entries(mapping).map(([from, to]) =>
+      `<tr><td><code>${escapeHtml(from)}</code></td><td>→</td><td><strong>${escapeHtml(to)}</strong></td></tr>`
+    ).join('');
+
+    showModal(escapeHtml(t.name), `
+      ${t.description ? `<p class="text-muted">${escapeHtml(t.description)}</p>` : ''}
+      <div class="section">
+        <h5>열 매핑</h5>
+        ${mappingRows ? `
+          <table class="table table-sm"><tbody>${mappingRows}</tbody></table>
+        ` : '<p class="text-muted">매핑 없음</p>'}
+      </div>
+      ${dateCols.length ? `<div class="section"><h5>날짜 열</h5><p>${dateCols.map(c => `<span class="badge badge-info">${escapeHtml(c)}</span>`).join(' ')}</p></div>` : ''}
+      ${numberCols.length ? `<div class="section"><h5>숫자 열</h5><p>${numberCols.map(c => `<span class="badge badge-warning">${escapeHtml(c)}</span>`).join(' ')}</p></div>` : ''}
+    `);
+  } catch(err) {
+    showToast('상세 정보를 불러올 수 없습니다', 'error');
+  }
+}
+
+async function deleteTemplate(id) {
+  if (!confirm('이 템플릿을 삭제하시겠습니까?')) return;
+  try {
+    await API.delete(`/api/documents/mapping-templates/${id}/`);
+    showToast('삭제되었습니다');
+    loadTemplates();
+  } catch(err) {
+    showToast('삭제 실패', 'error');
+  }
+}
+
+document.getElementById('btn-new-template').addEventListener('click', () => {
+  showModal('새 매핑 템플릿', `
+    <form id="new-template-form">
+      <div class="form-group">
+        <label>이름 <span class="required">*</span></label>
+        <input type="text" id="tpl-name" class="form-input" required>
+      </div>
+      <div class="form-group">
+        <label>설명</label>
+        <textarea id="tpl-desc" class="form-textarea" rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label>열 매핑 (JSON)</label>
+        <textarea id="tpl-mapping" class="form-textarea" rows="4" placeholder='{"매출액": "sales", "거래처": "customer"}'>{}</textarea>
+      </div>
+      <div class="form-group">
+        <label>날짜 열 (콤마 구분)</label>
+        <input type="text" id="tpl-date-cols" class="form-input" placeholder="날짜, date">
+      </div>
+      <div class="form-group">
+        <label>숫자 열 (콤마 구분)</label>
+        <input type="text" id="tpl-number-cols" class="form-input" placeholder="금액, amount">
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">생성</button>
+    </form>
+  `);
+
+  document.getElementById('new-template-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const mapping = JSON.parse(document.getElementById('tpl-mapping').value || '{}');
+      const dateCols = document.getElementById('tpl-date-cols').value.split(',').map(s => s.trim()).filter(Boolean);
+      const numberCols = document.getElementById('tpl-number-cols').value.split(',').map(s => s.trim()).filter(Boolean);
+
+      await API.post('/api/documents/mapping-templates/', {
+        name: document.getElementById('tpl-name').value,
+        description: document.getElementById('tpl-desc').value,
+        column_mapping: mapping,
+        date_columns: dateCols,
+        number_columns: numberCols,
+      });
+      closeModal();
+      showToast('템플릿이 생성되었습니다');
+      loadTemplates();
+    } catch(err) {
+      showToast(err.message || '생성 실패', 'error');
+    }
+  });
+});
+
+document.addEventListener('DOMContentLoaded', loadTemplates);
+</script>
+{% endblock %}

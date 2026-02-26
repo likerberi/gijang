@@ -1,0 +1,81 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}문서 처리 자동화{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <div id="app">
+    <!-- 사이드바 -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h1 class="logo">� 기장</h1>
+        <p class="logo-sub">세무기장 자동화</p>
+      </div>
+      <nav class="nav">
+        <a href="/" class="nav-item {% block nav_dashboard %}{% endblock %}" data-page="dashboard">
+          <span class="nav-icon">📊</span> 대시보드
+        </a>
+        <a href="/app/documents/" class="nav-item {% block nav_documents %}{% endblock %}" data-page="documents">
+          <span class="nav-icon">�</span> 거래내역
+        </a>
+        <a href="/app/merge/" class="nav-item {% block nav_merge %}{% endblock %}" data-page="merge">
+          <span class="nav-icon">🔗</span> 파일 병합
+        </a>
+        <a href="/app/templates/" class="nav-item {% block nav_templates %}{% endblock %}" data-page="templates">
+          <span class="nav-icon">📋</span> 매핑 템플릿
+        </a>
+        <a href="/guide/" class="nav-item {% block nav_guide %}{% endblock %}" data-page="guide">
+          <span class="nav-icon">❓</span> 사용 가이드
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="user-info" id="user-info">
+          <span class="user-avatar">👤</span>
+          <span class="user-name" id="user-name">로그인 필요</span>
+        </div>
+        <button class="btn btn-sm btn-ghost" id="btn-logout" style="display:none;">로그아웃</button>
+      </div>
+    </aside>
+
+    <!-- 메인 컨텐츠 -->
+    <main class="main-content">
+      <header class="top-bar">
+        <button class="menu-toggle" id="menu-toggle">☰</button>
+        <h2 class="page-title">{% block page_title %}대시보드{% endblock %}</h2>
+        <div class="top-bar-actions">
+          {% block top_actions %}{% endblock %}
+        </div>
+      </header>
+      <div class="content">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  <!-- 모달 컨테이너 -->
+  <div class="modal-overlay" id="modal-overlay" style="display:none;">
+    <div class="modal" id="modal">
+      <div class="modal-header">
+        <h3 id="modal-title"></h3>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer" id="modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- 토스트 알림 -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="{% static 'js/api.js' %}"></script>
+  <script src="{% static 'js/app.js' %}"></script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

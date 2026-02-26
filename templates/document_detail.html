@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+{% block title %}거래내역 - DocMerge{% endblock %}
+{% block nav_documents %}active{% endblock %}
+{% block page_title %}거래내역 상세{% endblock %}
+
+{% block top_actions %}
+<button class="btn btn-ghost" onclick="location.href='/app/documents/'">← 문서 목록</button>
+<button class="btn btn-primary" id="btn-download">📥 기장 엑셀 다운로드</button>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+/* 재무 요약 카드 */
+.fin-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.fin-card { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); border-left: 4px solid var(--c-gray-200); }
+.fin-card.income { border-left-color: #10b981; }
+.fin-card.expense { border-left-color: #ef4444; }
+.fin-card.net { border-left-color: #2563eb; }
+.fin-card.count { border-left-color: #8b5cf6; }
+.fin-card .fin-label { font-size: .8rem; color: var(--c-gray-500); margin-bottom: .25rem; }
+.fin-card .fin-value { font-size: 1.5rem; font-weight: 700; }
+.fin-card.income .fin-value { color: #10b981; }
+.fin-card.expense .fin-value { color: #ef4444; }
+.fin-card.net .fin-value { color: #2563eb; }
+
+/* 카테고리 분석 */
+.category-section { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+.category-table-wrap { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.category-table-wrap h4 { margin: 0 0 .75rem; font-size: 1rem; }
+
+/* 데이터 테이블 섹션 */
+.data-section { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.data-toolbar { display: flex; gap: .75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+.data-toolbar .form-input, .data-toolbar .form-select { height: 36px; font-size: .85rem; }
+.data-toolbar .search-input { flex: 1; min-width: 200px; }
+.data-info { font-size: .8rem; color: var(--c-gray-500); margin-left: auto; white-space: nowrap; }
+
+/* 거래 테이블 */
+#data-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+#data-table thead th {
+  background: #f8fafc; border-bottom: 2px solid var(--c-gray-200);
+  padding: .6rem .5rem; text-align: left; cursor: pointer; white-space: nowrap;
+  position: sticky; top: 0; z-index: 1;
+  user-select: none;
+}
+#data-table thead th:hover { background: #e2e8f0; }
+#data-table thead th .sort-icon { margin-left: .25rem; font-size: .7rem; }
+#data-table tbody td { padding: .5rem; border-bottom: 1px solid var(--c-gray-100); }
+#data-table tbody tr:hover { background: #f1f5f9; }
+.cell-number { text-align: right; font-variant-numeric: tabular-nums; }
+.cell-category { font-size: .75rem; padding: .2rem .5rem; border-radius: 4px; background: #e0e7ff; color: #3730a3; white-space: nowrap; }
+.cell-category.unclassified { background: #fef3c7; color: #92400e; }
+
+/* 페이지네이션 */
+.pag { display: flex; justify-content: center; gap: .25rem; margin-top: 1rem; }
+.pag button { min-width: 36px; height: 36px; border: 1px solid var(--c-gray-200); border-radius: 6px; background: #fff; cursor: pointer; font-size: .85rem; }
+.pag button.active { background: var(--c-primary); color: #fff; border-color: var(--c-primary); }
+.pag button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* 열 감지 알림 */
+.detect-alert { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: .75rem 1rem; margin-bottom: 1rem; font-size: .85rem; color: #065f46; }
+.detect-alert strong { color: #047857; }
+.no-financial { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+.no-financial strong { color: #78350f; }
+
+/* 바 차트 */
+.bar-wrap { display: flex; align-items: center; gap: .5rem; margin-bottom: .35rem; }
+.bar-label { font-size: .8rem; min-width: 80px; text-align: right; }
+.bar { height: 20px; border-radius: 4px; min-width: 2px; }
+.bar-income { background: #10b981; }
+.bar-expense { background: #ef4444; }
+.bar-val { font-size: .75rem; color: var(--c-gray-500); }
+
+@media (max-width: 768px) {
+  .fin-summary { grid-template-columns: 1fr 1fr; }
+  .category-section { grid-template-columns: 1fr; }
+  .data-toolbar { flex-direction: column; }
+  .data-info { margin-left: 0; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="doc-info" style="margin-bottom:.5rem;"></div>
+
+<!-- 재무 요약 카드 -->
+<div class="fin-summary" id="fin-summary" style="display:none;">
+  <div class="fin-card income">
+    <div class="fin-label">총 입금</div>
+    <div class="fin-value" id="fin-income">-</div>
+  </div>
+  <div class="fin-card expense">
+    <div class="fin-label">총 출금</div>
+    <div class="fin-value" id="fin-expense">-</div>
+  </div>
+  <div class="fin-card net">
+    <div class="fin-label">순이익</div>
+    <div class="fin-value" id="fin-net">-</div>
+  </div>
+  <div class="fin-card count">
+    <div class="fin-label">거래 건수</div>
+    <div class="fin-value" id="fin-count">-</div>
+  </div>
+</div>
+
+<!-- 열 감지 알림 -->
+<div id="detect-msg"></div>
+
+<!-- 카테고리 분석 -->
+<div class="category-section" id="category-section" style="display:none;">
+  <div class="category-table-wrap">
+    <h4>📊 계정과목별 요약</h4>
+    <div id="category-table-body"></div>
+  </div>
+  <div class="category-table-wrap">
+    <h4>📈 계정과목별 비교</h4>
+    <div id="category-chart"></div>
+  </div>
+</div>
+
+<!-- 데이터 테이블 -->
+<div class="data-section">
+  <div class="data-toolbar">
+    <input type="text" class="form-input search-input" id="search-input" placeholder="🔍 거래내용 검색...">
+    <select class="form-select" id="category-filter">
+      <option value="">전체 계정과목</option>
+    </select>
+    <select class="form-select" id="page-size-select">
+      <option value="50">50행</option>
+      <option value="100">100행</option>
+      <option value="200">200행</option>
+      <option value="500">500행</option>
+    </select>
+    <span class="data-info" id="data-info">-</span>
+  </div>
+  <div style="overflow-x:auto; max-height: 70vh;">
+    <table id="data-table">
+      <thead id="data-thead"><tr><th>로딩 중...</th></tr></thead>
+      <tbody id="data-tbody"><tr><td class="empty-state">데이터를 불러오는 중...</td></tr></tbody>
+    </table>
+  </div>
+  <div class="pag" id="pagination"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const DOC_ID = {{ doc_id }};
+let currentPage = 1;
+let pageSize = 50;
+let sortCol = '';
+let sortDir = 'asc';
+let searchQuery = '';
+let categoryFilter = '';
+let allHeaders = [];
+let financialCols = {};
+let userClassifications = {};
+
+function money(v) {
+  if (v == null || isNaN(v)) return '-';
+  return Math.round(v).toLocaleString() + '원';
+}
+
+async function loadData() {
+  let url = `/api/documents/documents/${DOC_ID}/data/?page=${currentPage}&page_size=${pageSize}`;
+  if (searchQuery) url += `&search=${encodeURIComponent(searchQuery)}`;
+  if (sortCol !== '') url += `&sort_col=${sortCol}&sort_dir=${sortDir}`;
+  if (categoryFilter) url += `&category=${encodeURIComponent(categoryFilter)}`;
+
+  try {
+    const d = await API.get(url);
+    allHeaders = d.headers || [];
+    financialCols = d.financial_columns || {};
+
+    // 재무 요약
+    const fs = d.financial_summary;
+    if (fs) {
+      document.getElementById('fin-summary').style.display = 'grid';
+      document.getElementById('fin-income').textContent = money(fs.total_income);
+      document.getElementById('fin-expense').textContent = money(fs.total_expense);
+      document.getElementById('fin-net').textContent = money(fs.net);
+      document.getElementById('fin-count').textContent = fs.transaction_count.toLocaleString() + '건';
+
+      // 열 감지 메시지
+      const dc = fs.detected_columns || {};
+      const parts = [];
+      if (dc.date) parts.push(`날짜: ${dc.date}`);
+      if (dc.description) parts.push(`적요: ${dc.description}`);
+      if (dc.income) parts.push(`입금: ${dc.income}`);
+      if (dc.expense) parts.push(`출금: ${dc.expense}`);
+      if (dc.balance) parts.push(`잔액: ${dc.balance}`);
+      if (parts.length > 0) {
+        document.getElementById('detect-msg').innerHTML = `<div class="detect-alert"><strong>💡 자동 감지된 열:</strong> ${parts.join(' | ')}</div>`;
+      }
+
+      // 카테고리 분석
+      const bd = fs.category_breakdown;
+      if (bd && Object.keys(bd).length > 0) {
+        document.getElementById('category-section').style.display = 'grid';
+        renderCategoryAnalysis(bd);
+        populateCategoryFilter(bd);
+      }
+    } else {
+      document.getElementById('detect-msg').innerHTML = '<div class="detect-alert no-financial"><strong>ℹ️</strong> 입금/출금 열을 자동 감지하지 못했습니다. 재무 요약 없이 전체 데이터를 표시합니다.</div>';
+    }
+
+    // 테이블 헤더
+    const thead = document.getElementById('data-thead');
+    thead.innerHTML = `<tr>${allHeaders.map((h, i) => {
+      const isSorted = String(i) === String(sortCol);
+      const icon = isSorted ? (sortDir === 'asc' ? '▲' : '▼') : '⇅';
+      return `<th onclick="toggleSort(${i})">${escapeHtml(String(h || ''))}<span class="sort-icon">${icon}</span></th>`;
+    }).join('')}<th>계정과목</th></tr>`;
+
+    // 테이블 본문
+    const tbody = document.getElementById('data-tbody');
+    const rows = d.rows || [];
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="' + (allHeaders.length + 1) + '" class="empty-state">데이터가 없습니다</td></tr>';
+    } else {
+      // 입금/출금 열 인덱스 (숫자 정렬용)
+      const incomeIdx = financialCols.income ? allHeaders.indexOf(financialCols.income) : -1;
+      const expenseIdx = financialCols.expense ? allHeaders.indexOf(financialCols.expense) : -1;
+      const balanceIdx = financialCols.balance ? allHeaders.indexOf(financialCols.balance) : -1;
+      const numericCols = new Set([incomeIdx, expenseIdx, balanceIdx].filter(i => i >= 0));
+
+      tbody.innerHTML = rows.map((r, ri) => {
+        const cells = r.cells || [];
+        const cat = r.category || '미분류';
+        const catClass = cat === '미분류' ? 'cell-category unclassified' : 'cell-category';
+        return `<tr>${cells.map((c, ci) => {
+          const isNum = numericCols.has(ci);
+          const cls = isNum ? ' class="cell-number"' : '';
+          let val = c;
+          if (isNum && c != null && c !== '') {
+            try {
+              const n = parseFloat(String(c).replace(/,/g, '').replace('원', ''));
+              if (!isNaN(n)) val = n.toLocaleString();
+            } catch(e) {}
+          }
+          return `<td${cls}>${escapeHtml(String(val ?? ''))}</td>`;
+        }).join('')}<td><span class="${catClass}">${escapeHtml(cat)}</span></td></tr>`;
+      }).join('');
+    }
+
+    // 페이지 정보
+    document.getElementById('data-info').textContent = `${d.total.toLocaleString()}건 중 ${((d.page-1)*d.page_size+1).toLocaleString()}-${Math.min(d.page*d.page_size, d.total).toLocaleString()}건`;
+
+    // 페이지네이션
+    renderPagination(d.page, d.total_pages);
+
+  } catch(err) {
+    console.error('Data load error:', err);
+    showToast('데이터를 불러올 수 없습니다: ' + (err.message || ''), 'error');
+  }
+}
+
+function renderPagination(current, total) {
+  const pag = document.getElementById('pagination');
+  if (total <= 1) { pag.innerHTML = ''; return; }
+
+  let btns = '';
+  btns += `<button ${current <= 1 ? 'disabled' : ''} onclick="goPage(${current-1})">‹</button>`;
+  
+  // 최대 7개 버튼
+  let start = Math.max(1, current - 3);
+  let end = Math.min(total, start + 6);
+  start = Math.max(1, end - 6);
+  
+  if (start > 1) btns += `<button onclick="goPage(1)">1</button><button disabled>…</button>`;
+  for (let i = start; i <= end; i++) {
+    btns += `<button class="${i === current ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
+  }
+  if (end < total) btns += `<button disabled>…</button><button onclick="goPage(${total})">${total}</button>`;
+  
+  btns += `<button ${current >= total ? 'disabled' : ''} onclick="goPage(${current+1})">›</button>`;
+  pag.innerHTML = btns;
+}
+
+function goPage(p) { currentPage = p; loadData(); }
+
+function toggleSort(colIdx) {
+  if (String(sortCol) === String(colIdx)) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortCol = colIdx;
+    sortDir = 'asc';
+  }
+  currentPage = 1;
+  loadData();
+}
+
+function renderCategoryAnalysis(breakdown) {
+  const sorted = Object.entries(breakdown).sort((a, b) => (b[1].expense + b[1].income) - (a[1].expense + a[1].income));
+  const maxVal = Math.max(...sorted.map(([, v]) => Math.max(v.income, v.expense)), 1);
+
+  // 테이블
+  let html = '<table class="table table-sm" style="font-size:.85rem;"><thead><tr><th>계정과목</th><th style="text-align:right">건수</th><th style="text-align:right">입금</th><th style="text-align:right">출금</th></tr></thead><tbody>';
+  for (const [cat, info] of sorted) {
+    html += `<tr><td><span class="${cat === '미분류' ? 'cell-category unclassified' : 'cell-category'}">${escapeHtml(cat)}</span></td>`;
+    html += `<td style="text-align:right">${info.count}</td>`;
+    html += `<td style="text-align:right;color:#10b981;">${info.income ? Math.round(info.income).toLocaleString() : '-'}</td>`;
+    html += `<td style="text-align:right;color:#ef4444;">${info.expense ? Math.round(info.expense).toLocaleString() : '-'}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('category-table-body').innerHTML = html;
+
+  // 바 차트
+  let chart = '';
+  for (const [cat, info] of sorted) {
+    const incW = Math.max((info.income / maxVal) * 100, 0);
+    const expW = Math.max((info.expense / maxVal) * 100, 0);
+    chart += `<div class="bar-wrap"><span class="bar-label">${escapeHtml(cat)}</span>`;
+    if (info.income > 0) chart += `<div class="bar bar-income" style="width:${incW}%" title="입금: ${Math.round(info.income).toLocaleString()}"></div>`;
+    if (info.expense > 0) chart += `<div class="bar bar-expense" style="width:${expW}%" title="출금: ${Math.round(info.expense).toLocaleString()}"></div>`;
+    chart += '</div>';
+  }
+  document.getElementById('category-chart').innerHTML = chart || '<p class="text-muted">데이터 없음</p>';
+}
+
+function populateCategoryFilter(breakdown) {
+  const sel = document.getElementById('category-filter');
+  for (const cat of Object.keys(breakdown).sort()) {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    sel.appendChild(opt);
+  }
+}
+
+// 다운로드
+document.getElementById('btn-download').addEventListener('click', async () => {
+  try {
+    const token = API.getToken();
+    if (!token) throw new Error('로그인이 필요합니다');
+    let resp = await fetch(`/api/documents/documents/${DOC_ID}/download_data/`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (resp.status === 401) {
+      await API.refreshToken();
+      resp = await fetch(`/api/documents/documents/${DOC_ID}/download_data/`, {
+        headers: { 'Authorization': `Bearer ${API.getToken()}` }
+      });
+    }
+    if (!resp.ok) throw new Error('다운로드 실패');
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `기장정리_${DOC_ID}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    showToast('기장 엑셀 다운로드 완료');
+  } catch(err) {
+    showToast(err.message || '다운로드 실패', 'error');
+  }
+});
+
+// 검색
+let searchTimer;
+document.getElementById('search-input').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    searchQuery = e.target.value.trim();
+    currentPage = 1;
+    loadData();
+  }, 400);
+});
+
+// 카테고리 필터
+document.getElementById('category-filter').addEventListener('change', (e) => {
+  categoryFilter = e.target.value;
+  currentPage = 1;
+  loadData();
+});
+
+// 페이지 사이즈
+document.getElementById('page-size-select').addEventListener('change', (e) => {
+  pageSize = parseInt(e.target.value);
+  currentPage = 1;
+  loadData();
+});
+
+// 문서 기본 정보 로드
+async function loadDocInfo() {
+  try {
+    const doc = await API.get(`/api/documents/documents/${DOC_ID}/`);
+    document.getElementById('doc-info').innerHTML = `
+      <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem;">
+        <h3 style="margin:0;font-size:1.1rem;">${escapeHtml(doc.original_filename)}</h3>
+        ${statusBadge(doc.status)}
+        <span class="badge badge-type">${doc.file_type}</span>
+        <span class="text-muted" style="font-size:.85rem;">${formatSize(doc.file_size)} · ${formatDate(doc.created_at)}</span>
+      </div>
+    `;
+  } catch(err) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadDocInfo();
+  loadData();
+});
+</script>
+{% endblock %}

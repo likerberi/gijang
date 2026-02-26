@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}대시보드 - 기장{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+{% block page_title %}기장 대시보드{% endblock %}
+
+{% block extra_head %}
+<style>
+.fin-overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.fin-ov-card { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); border-left: 4px solid var(--c-gray-200); }
+.fin-ov-card.income { border-left-color: #10b981; }
+.fin-ov-card.expense { border-left-color: #ef4444; }
+.fin-ov-card.net { border-left-color: #2563eb; }
+.fin-ov-card.files { border-left-color: #8b5cf6; }
+.fin-ov-card .ov-label { font-size: .8rem; color: var(--c-gray-500); margin-bottom: .25rem; }
+.fin-ov-card .ov-value { font-size: 1.4rem; font-weight: 700; }
+.fin-ov-card.income .ov-value { color: #10b981; }
+.fin-ov-card.expense .ov-value { color: #ef4444; }
+.fin-ov-card.net .ov-value { color: #2563eb; }
+@media (max-width: 768px) { .fin-overview { grid-template-columns: 1fr 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 재무 요약 -->
+<div class="fin-overview" id="fin-overview">
+  <div class="fin-ov-card income">
+    <div class="ov-label">총 입금 합계</div>
+    <div class="ov-value" id="ov-income">-</div>
+  </div>
+  <div class="fin-ov-card expense">
+    <div class="ov-label">총 출금 합계</div>
+    <div class="ov-value" id="ov-expense">-</div>
+  </div>
+  <div class="fin-ov-card net">
+    <div class="ov-label">순이익 합계</div>
+    <div class="ov-value" id="ov-net">-</div>
+  </div>
+  <div class="fin-ov-card files">
+    <div class="ov-label">처리된 문서</div>
+    <div class="ov-value" id="ov-files">-</div>
+  </div>
+</div>
+
+<!-- 빠른 작업 -->
+<div class="section">
+  <h3 class="section-title">빠른 시작</h3>
+  <div class="quick-actions">
+    <a href="/app/documents/" class="action-card">
+      <div class="action-icon">📤</div>
+      <div class="action-title">거래내역 업로드</div>
+      <div class="action-desc">은행/카드 거래 엑셀을 업로드하면 자동 분석합니다</div>
+    </a>
+    <a href="/app/merge/" class="action-card">
+      <div class="action-icon">🔗</div>
+      <div class="action-title">파일 병합</div>
+      <div class="action-desc">여러 거래내역 파일을 하나로 합치고 계정과목을 정리합니다</div>
+    </a>
+    <a href="/app/templates/" class="action-card">
+      <div class="action-icon">📋</div>
+      <div class="action-title">매핑 템플릿</div>
+      <div class="action-desc">은행/카드사별 열 이름 매핑을 저장하고 재사용합니다</div>
+    </a>
+  </div>
+</div>
+
+<!-- 최근 문서 -->
+<div class="section">
+  <div class="section-header">
+    <h3 class="section-title">최근 처리 문서</h3>
+    <a href="/app/documents/" class="btn btn-sm btn-ghost">전체 보기 →</a>
+  </div>
+  <div class="table-wrap">
+    <table class="table" id="recent-docs-table">
+      <thead>
+        <tr>
+          <th>파일명</th>
+          <th>유형</th>
+          <th>상태</th>
+          <th>행 수</th>
+          <th>크기</th>
+          <th>업로드일</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="recent-docs-body">
+        <tr><td colspan="7" class="empty-state">로딩 중...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function money(v) {
+  if (v == null || isNaN(v)) return '-';
+  return Math.round(v).toLocaleString() + '원';
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    // 문서 목록 로드
+    const docs = await API.get('/api/documents/documents/?page_size=10');
+    const results = docs.results || [];
+
+    // 최근 문서 테이블
+    const tbody = document.getElementById('recent-docs-body');
+    if (results.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-state">업로드된 문서가 없습니다. 거래내역 엑셀을 업로드해보세요!</td></tr>';
+    } else {
+      tbody.innerHTML = results.map(d => `
+        <tr>
+          <td><strong>${escapeHtml(d.original_filename)}</strong></td>
+          <td><span class="badge badge-type">${d.file_type}</span></td>
+          <td>${statusBadge(d.status)}</td>
+          <td>${d.status === 'completed' ? '-' : '-'}</td>
+          <td>${formatSize(d.file_size)}</td>
+          <td>${formatDate(d.created_at)}</td>
+          <td>${d.status === 'completed' ? `<a href="/app/documents/${d.id}/" class="btn btn-xs btn-primary">📊 보기</a>` : ''}</td>
+        </tr>
+      `).join('');
+    }
+
+    // 파일 통계
+    const completedDocs = results.filter(d => d.status === 'completed');
+    document.getElementById('ov-files').textContent = `${completedDocs.length} / ${docs.count || results.length}`;
+
+    // 재무 요약 집계 (완료된 문서들의 요약 합계)
+    let totalIncome = 0, totalExpense = 0;
+    let hasFinancial = false;
+    
+    for (const doc of completedDocs.slice(0, 5)) {
+      try {
+        const sum = await API.get(`/api/documents/documents/${doc.id}/summary/`);
+        if (sum.financial_summary) {
+          hasFinancial = true;
+          totalIncome += sum.financial_summary.total_income || 0;
+          totalExpense += sum.financial_summary.total_expense || 0;
+        }
+      } catch(e) {}
+    }
+
+    if (hasFinancial) {
+      document.getElementById('ov-income').textContent = money(totalIncome);
+      document.getElementById('ov-expense').textContent = money(totalExpense);
+      document.getElementById('ov-net').textContent = money(totalIncome - totalExpense);
+    } else {
+      document.getElementById('ov-income').textContent = '-';
+      document.getElementById('ov-expense').textContent = '-';
+      document.getElementById('ov-net').textContent = '-';
+    }
+
+  } catch (err) {
+    console.error('Dashboard load error:', err);
+  }
+});
+</script>
+{% endblock %}
