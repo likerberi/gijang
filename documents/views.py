@@ -5,16 +5,19 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from .models import Document, ExtractedData, Report, MergeProject, MergeFile, ColumnMappingTemplate
+from .models import Document, ExtractedData, Report, MergeProject, MergeFile, ColumnMappingTemplate, Vendor
 from .serializers import (
     DocumentSerializer, DocumentUploadSerializer,
     ExtractedDataSerializer, ReportSerializer,
     MergeProjectSerializer, MergeProjectCreateSerializer,
     MergeProjectUpdateMappingSerializer, MergeFileSerializer,
     MergeFileUploadSerializer, ColumnMappingTemplateSerializer,
+    VendorSerializer,
 )
 from .tasks import process_document, analyze_merge_files, execute_merge
 import math
+from datetime import datetime, date
+from collections import defaultdict
 
 
 # ========================
@@ -158,6 +161,96 @@ def compute_financial_summary(structured_data):
     
     summary['net'] = summary['total_income'] - summary['total_expense']
     return summary
+
+
+def _parse_date(date_str):
+    """다양한 날짜 형식을 파싱"""
+    if not date_str:
+        return None
+    date_str = str(date_str).strip()
+    formats = [
+        '%Y-%m-%d', '%Y.%m.%d', '%Y/%m/%d',
+        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M',
+        '%Y.%m.%d %H:%M:%S', '%Y.%m.%d %H:%M',
+        '%m/%d/%Y', '%d-%m-%Y',
+        '%Y%m%d',
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    # 숫자만 있는 경우 (Excel serial date)
+    try:
+        serial = float(date_str)
+        if 30000 < serial < 60000:
+            from datetime import timedelta
+            return datetime(1899, 12, 30) + timedelta(days=int(serial))
+    except:
+        pass
+    return None
+
+
+def _extract_vendor_name(description):
+    """적요에서 거래처명 추출"""
+    if not description:
+        return ''
+    desc = str(description).strip()
+    
+    # 입금/출금 접두어 등 제거
+    prefixes_to_remove = [
+        '매출 입금 - ', '매출 입금-', '입금 - ', '입금-',
+        '출금 - ', '출금-', '이체 - ', '이체-',
+        '카드결제 - ', '카드결제-', '체크카드 ', '신용카드 ',
+        '자동이체 ', '급여이체 ', 'CMS출금 ', 'CMS ',
+    ]
+    for prefix in prefixes_to_remove:
+        if desc.startswith(prefix):
+            desc = desc[len(prefix):]
+            break
+    
+    # 괄호 안 내용 제거
+    import re
+    desc = re.sub(r'\(.*?\)', '', desc).strip()
+    desc = re.sub(r'\[.*?\]', '', desc).strip()
+    
+    # 날짜/시간 패턴 제거
+    desc = re.sub(r'\d{4}[-/.]\d{1,2}[-/.]\d{1,2}', '', desc).strip()
+    desc = re.sub(r'\d{1,2}:\d{2}(:\d{2})?', '', desc).strip()
+    
+    # 과도한 공백 정리
+    desc = re.sub(r'\s+', ' ', desc).strip()
+    
+    return desc if len(desc) >= 2 else ''
+
+
+# ========================
+# 세금 달력 데이터
+# ========================
+
+TAX_CALENDAR = [
+    {'month': 1, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 1, 'day': 25, 'title': '부가가치세 확정신고', 'desc': '7~12월분 (2기) 확정신고·납부', 'type': 'quarterly'},
+    {'month': 1, 'day': 31, 'title': '지급명세서 제출', 'desc': '전년도 근로·사업소득 지급명세서', 'type': 'annual'},
+    {'month': 2, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 3, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 3, 'day': 31, 'title': '법인세 신고·납부', 'desc': '12월 결산법인 법인세 신고·납부', 'type': 'annual'},
+    {'month': 4, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 4, 'day': 25, 'title': '부가가치세 예정신고', 'desc': '1~3월분 (1기) 예정신고·납부', 'type': 'quarterly'},
+    {'month': 5, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 5, 'day': 31, 'title': '종합소득세 신고·납부', 'desc': '전년도 종합소득세 확정신고·납부', 'type': 'annual'},
+    {'month': 6, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 7, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 7, 'day': 25, 'title': '부가가치세 확정신고', 'desc': '1~6월분 (1기) 확정신고·납부', 'type': 'quarterly'},
+    {'month': 8, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 8, 'day': 31, 'title': '법인세 중간예납', 'desc': '12월 결산법인 중간예납', 'type': 'annual'},
+    {'month': 9, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 10, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 10, 'day': 25, 'title': '부가가치세 예정신고', 'desc': '7~9월분 (2기) 예정신고·납부', 'type': 'quarterly'},
+    {'month': 11, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+    {'month': 11, 'day': 30, 'title': '종합소득세 중간예납', 'desc': '종합소득세 중간예납 납부', 'type': 'annual'},
+    {'month': 12, 'day': 10, 'title': '원천세 신고·납부', 'desc': '전월분 원천징수세액 신고·납부', 'type': 'monthly'},
+]
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
@@ -527,6 +620,541 @@ class DocumentViewSet(viewsets.ModelViewSet):
             'total_classified': len(user_classifications),
         })
 
+    # ========================
+    # 부가세 신고서
+    # ========================
+
+    @action(detail=True, methods=['get'])
+    def vat_report(self, request, pk=None):
+        """부가세 신고 데이터 생성
+        
+        쿼리 파라미터:
+        - quarter: 분기 (1,2,3,4) - 미지정시 전체
+        - year: 연도 - 미지정시 현재년
+        """
+        document = self.get_object()
+        
+        try:
+            extracted = document.extracted_data
+        except ExtractedData.DoesNotExist:
+            return Response({'error': '추출된 데이터가 없습니다.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        sd = extracted.structured_data
+        headers = sd.get('headers', [])
+        rows = sd.get('rows', [])
+        
+        if not headers or not rows:
+            return Response({'error': '데이터가 없습니다.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        fin_cols = detect_financial_columns(headers)
+        income_idx = fin_cols.get('income')
+        expense_idx = fin_cols.get('expense')
+        desc_idx = fin_cols.get('description')
+        date_idx = fin_cols.get('date')
+        
+        # 분기 필터
+        quarter = request.query_params.get('quarter')
+        year = request.query_params.get('year', str(date.today().year))
+        
+        filtered_rows = rows
+        if quarter and date_idx is not None:
+            q = int(quarter)
+            q_months = {1: [1,2,3], 2: [4,5,6], 3: [7,8,9], 4: [10,11,12]}
+            target_months = q_months.get(q, [])
+            filtered = []
+            for row in rows:
+                if date_idx < len(row) and row[date_idx]:
+                    try:
+                        d = _parse_date(str(row[date_idx]))
+                        if d and d.month in target_months and str(d.year) == year:
+                            filtered.append(row)
+                    except:
+                        filtered.append(row)
+                else:
+                    filtered.append(row)
+            filtered_rows = filtered
+        
+        # 매출/매입 분류
+        sales_items = []  # 매출 (수입)
+        purchase_items = []  # 매입 (지출)
+        
+        total_sales = 0
+        total_purchases = 0
+        
+        for row in filtered_rows:
+            desc = str(row[desc_idx]) if desc_idx is not None and desc_idx < len(row) else ''
+            category = classify_transaction(desc)
+            
+            inc_amount = 0
+            exp_amount = 0
+            
+            if income_idx is not None and income_idx < len(row):
+                try:
+                    val = row[income_idx]
+                    inc_amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if math.isnan(inc_amount):
+                        inc_amount = 0
+                except:
+                    inc_amount = 0
+            
+            if expense_idx is not None and expense_idx < len(row):
+                try:
+                    val = row[expense_idx]
+                    exp_amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if math.isnan(exp_amount):
+                        exp_amount = 0
+                except:
+                    exp_amount = 0
+            
+            date_str = str(row[date_idx]) if date_idx is not None and date_idx < len(row) else ''
+            
+            if inc_amount > 0:
+                total_sales += inc_amount
+                sales_items.append({
+                    'date': date_str,
+                    'description': desc,
+                    'category': category,
+                    'amount': inc_amount,
+                    'vat': round(inc_amount / 11, 0),  # 부가세 포함가 기준
+                    'supply': round(inc_amount * 10 / 11, 0),
+                })
+            
+            if exp_amount > 0:
+                total_purchases += exp_amount
+                purchase_items.append({
+                    'date': date_str,
+                    'description': desc,
+                    'category': category,
+                    'amount': exp_amount,
+                    'vat': round(exp_amount / 11, 0),
+                    'supply': round(exp_amount * 10 / 11, 0),
+                })
+        
+        # 세액 계산
+        sales_vat = round(total_sales / 11, 0)
+        purchase_vat = round(total_purchases / 11, 0)
+        payable_vat = sales_vat - purchase_vat
+        
+        # 카테고리별 매입 합계
+        purchase_by_category = defaultdict(lambda: {'count': 0, 'amount': 0, 'vat': 0})
+        for item in purchase_items:
+            cat = item['category']
+            purchase_by_category[cat]['count'] += 1
+            purchase_by_category[cat]['amount'] += item['amount']
+            purchase_by_category[cat]['vat'] += item['vat']
+        
+        return Response({
+            'document_id': document.id,
+            'filename': document.original_filename,
+            'period': {
+                'year': year,
+                'quarter': quarter,
+                'description': f"{year}년 {'제' + quarter + '기' if quarter else '전체'}",
+            },
+            'sales': {
+                'total_amount': total_sales,
+                'supply_value': round(total_sales * 10 / 11, 0),
+                'vat': sales_vat,
+                'count': len(sales_items),
+                'items': sales_items[:100],  # 상위 100건
+            },
+            'purchases': {
+                'total_amount': total_purchases,
+                'supply_value': round(total_purchases * 10 / 11, 0),
+                'vat': purchase_vat,
+                'count': len(purchase_items),
+                'by_category': dict(purchase_by_category),
+                'items': purchase_items[:100],
+            },
+            'summary': {
+                'sales_vat': sales_vat,
+                'purchase_vat': purchase_vat,
+                'payable_vat': payable_vat,
+                'refund': max(-payable_vat, 0) if payable_vat < 0 else 0,
+            }
+        })
+
+    @action(detail=True, methods=['get'])
+    def vat_download(self, request, pk=None):
+        """부가세 신고서 엑셀 다운로드"""
+        from django.http import HttpResponse
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from io import BytesIO
+        
+        document = self.get_object()
+        
+        try:
+            extracted = document.extracted_data
+        except ExtractedData.DoesNotExist:
+            return Response({'error': '추출된 데이터가 없습니다.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        sd = extracted.structured_data
+        headers = sd.get('headers', [])
+        rows = sd.get('rows', [])
+        fin_cols = detect_financial_columns(headers)
+        income_idx = fin_cols.get('income')
+        expense_idx = fin_cols.get('expense')
+        desc_idx = fin_cols.get('description')
+        date_idx = fin_cols.get('date')
+        
+        quarter = request.query_params.get('quarter', '')
+        year = request.query_params.get('year', str(date.today().year))
+        
+        wb = openpyxl.Workbook()
+        
+        # 스타일
+        title_font = Font(bold=True, size=16, color='1F2937')
+        header_fill = PatternFill(start_color='2563EB', end_color='2563EB', fill_type='solid')
+        header_font = Font(bold=True, color='FFFFFF', size=10)
+        money_fmt = '#,##0'
+        thin_border = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin'),
+        )
+        
+        # === 시트 1: 부가세 요약 ===
+        ws = wb.active
+        ws.title = '부가세 요약'
+        
+        period_str = f"{year}년 {'제' + quarter + '기' if quarter else '전체'}"
+        ws.cell(row=1, column=1, value=f'부가가치세 신고 요약 - {period_str}').font = title_font
+        ws.merge_cells('A1:D1')
+        
+        # 매출 세액
+        ws.cell(row=3, column=1, value='■ 매출 세액').font = Font(bold=True, size=12, color='10B981')
+        ws.cell(row=4, column=1, value='구분').font = Font(bold=True)
+        ws.cell(row=4, column=2, value='공급가액').font = Font(bold=True)
+        ws.cell(row=4, column=3, value='세액').font = Font(bold=True)
+        
+        total_sales = 0
+        total_purchases = 0
+        
+        for row in rows:
+            if income_idx is not None and income_idx < len(row):
+                try:
+                    val = row[income_idx]
+                    amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if not math.isnan(amount):
+                        total_sales += amount
+                except:
+                    pass
+            if expense_idx is not None and expense_idx < len(row):
+                try:
+                    val = row[expense_idx]
+                    amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if not math.isnan(amount):
+                        total_purchases += amount
+                except:
+                    pass
+        
+        sales_supply = round(total_sales * 10 / 11, 0)
+        sales_vat = round(total_sales / 11, 0)
+        purchase_supply = round(total_purchases * 10 / 11, 0)
+        purchase_vat = round(total_purchases / 11, 0)
+        
+        ws.cell(row=5, column=1, value='과세 매출')
+        ws.cell(row=5, column=2, value=sales_supply).number_format = money_fmt
+        ws.cell(row=5, column=3, value=sales_vat).number_format = money_fmt
+        
+        # 매입 세액
+        ws.cell(row=7, column=1, value='■ 매입 세액').font = Font(bold=True, size=12, color='EF4444')
+        ws.cell(row=8, column=1, value='구분').font = Font(bold=True)
+        ws.cell(row=8, column=2, value='공급가액').font = Font(bold=True)
+        ws.cell(row=8, column=3, value='세액').font = Font(bold=True)
+        
+        ws.cell(row=9, column=1, value='과세 매입')
+        ws.cell(row=9, column=2, value=purchase_supply).number_format = money_fmt
+        ws.cell(row=9, column=3, value=purchase_vat).number_format = money_fmt
+        
+        # 납부 세액
+        payable = sales_vat - purchase_vat
+        ws.cell(row=11, column=1, value='■ 납부(환급) 세액').font = Font(bold=True, size=12, color='2563EB')
+        ws.cell(row=12, column=1, value='납부할 세액' if payable >= 0 else '환급받을 세액').font = Font(bold=True)
+        ws.cell(row=12, column=2, value=abs(payable)).number_format = money_fmt
+        ws.cell(row=12, column=2).font = Font(bold=True, size=14, color='2563EB')
+        
+        for col in ['A', 'B', 'C', 'D']:
+            ws.column_dimensions[col].width = 20
+        
+        # === 시트 2: 매출 내역 ===
+        ws2 = wb.create_sheet('매출 내역')
+        sale_headers = ['날짜', '적요', '계정과목', '금액', '공급가액', '세액']
+        for ci, h in enumerate(sale_headers, 1):
+            cell = ws2.cell(row=1, column=ci, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+        
+        row_num = 2
+        for row in rows:
+            if income_idx is not None and income_idx < len(row):
+                try:
+                    val = row[income_idx]
+                    amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if math.isnan(amount) or amount <= 0:
+                        continue
+                except:
+                    continue
+                
+                desc = str(row[desc_idx]) if desc_idx is not None and desc_idx < len(row) else ''
+                dt = str(row[date_idx]) if date_idx is not None and date_idx < len(row) else ''
+                cat = classify_transaction(desc)
+                
+                ws2.cell(row=row_num, column=1, value=dt)
+                ws2.cell(row=row_num, column=2, value=desc)
+                ws2.cell(row=row_num, column=3, value=cat)
+                ws2.cell(row=row_num, column=4, value=amount).number_format = money_fmt
+                ws2.cell(row=row_num, column=5, value=round(amount * 10 / 11, 0)).number_format = money_fmt
+                ws2.cell(row=row_num, column=6, value=round(amount / 11, 0)).number_format = money_fmt
+                row_num += 1
+        
+        for col in ['A', 'B', 'C', 'D', 'E', 'F']:
+            ws2.column_dimensions[col].width = 18
+        
+        # === 시트 3: 매입 내역 ===
+        ws3 = wb.create_sheet('매입 내역')
+        for ci, h in enumerate(sale_headers, 1):
+            cell = ws3.cell(row=1, column=ci, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+        
+        row_num = 2
+        for row in rows:
+            if expense_idx is not None and expense_idx < len(row):
+                try:
+                    val = row[expense_idx]
+                    amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if math.isnan(amount) or amount <= 0:
+                        continue
+                except:
+                    continue
+                
+                desc = str(row[desc_idx]) if desc_idx is not None and desc_idx < len(row) else ''
+                dt = str(row[date_idx]) if date_idx is not None and date_idx < len(row) else ''
+                cat = classify_transaction(desc)
+                
+                ws3.cell(row=row_num, column=1, value=dt)
+                ws3.cell(row=row_num, column=2, value=desc)
+                ws3.cell(row=row_num, column=3, value=cat)
+                ws3.cell(row=row_num, column=4, value=amount).number_format = money_fmt
+                ws3.cell(row=row_num, column=5, value=round(amount * 10 / 11, 0)).number_format = money_fmt
+                ws3.cell(row=row_num, column=6, value=round(amount / 11, 0)).number_format = money_fmt
+                row_num += 1
+        
+        for col in ['A', 'B', 'C', 'D', 'E', 'F']:
+            ws3.column_dimensions[col].width = 18
+        
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        
+        filename = f'부가세신고_{document.original_filename.rsplit(".", 1)[0]}_{period_str}.xlsx'
+        response = HttpResponse(
+            buf.read(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    # ========================
+    # 월별 손익 리포트
+    # ========================
+
+    @action(detail=True, methods=['get'])
+    def monthly_report(self, request, pk=None):
+        """월별 손익 리포트 API"""
+        document = self.get_object()
+        
+        try:
+            extracted = document.extracted_data
+        except ExtractedData.DoesNotExist:
+            return Response({'error': '추출된 데이터가 없습니다.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        sd = extracted.structured_data
+        headers = sd.get('headers', [])
+        rows = sd.get('rows', [])
+        
+        fin_cols = detect_financial_columns(headers)
+        income_idx = fin_cols.get('income')
+        expense_idx = fin_cols.get('expense')
+        desc_idx = fin_cols.get('description')
+        date_idx = fin_cols.get('date')
+        
+        if date_idx is None:
+            return Response({'error': '날짜 열을 감지할 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        monthly = defaultdict(lambda: {
+            'income': 0, 'expense': 0, 'net': 0, 'count': 0,
+            'categories': defaultdict(lambda: {'income': 0, 'expense': 0, 'count': 0}),
+        })
+        
+        for row in rows:
+            if date_idx >= len(row) or not row[date_idx]:
+                continue
+            
+            d = _parse_date(str(row[date_idx]))
+            if not d:
+                continue
+            
+            month_key = f"{d.year}-{d.month:02d}"
+            monthly[month_key]['count'] += 1
+            
+            desc = str(row[desc_idx]) if desc_idx is not None and desc_idx < len(row) else ''
+            category = classify_transaction(desc)
+            
+            inc_amount = 0
+            exp_amount = 0
+            
+            if income_idx is not None and income_idx < len(row):
+                try:
+                    val = row[income_idx]
+                    inc_amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if math.isnan(inc_amount):
+                        inc_amount = 0
+                except:
+                    inc_amount = 0
+            
+            if expense_idx is not None and expense_idx < len(row):
+                try:
+                    val = row[expense_idx]
+                    exp_amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if math.isnan(exp_amount):
+                        exp_amount = 0
+                except:
+                    exp_amount = 0
+            
+            monthly[month_key]['income'] += inc_amount
+            monthly[month_key]['expense'] += exp_amount
+            monthly[month_key]['categories'][category]['income'] += inc_amount
+            monthly[month_key]['categories'][category]['expense'] += exp_amount
+            monthly[month_key]['categories'][category]['count'] += 1
+        
+        # 정렬 및 net 계산
+        result = []
+        for month_key in sorted(monthly.keys()):
+            data = monthly[month_key]
+            data['net'] = data['income'] - data['expense']
+            data['month'] = month_key
+            data['categories'] = dict(data['categories'])
+            result.append(data)
+        
+        # 누적 합계
+        cumulative_income = 0
+        cumulative_expense = 0
+        for item in result:
+            cumulative_income += item['income']
+            cumulative_expense += item['expense']
+            item['cumulative_income'] = cumulative_income
+            item['cumulative_expense'] = cumulative_expense
+            item['cumulative_net'] = cumulative_income - cumulative_expense
+        
+        return Response({
+            'document_id': document.id,
+            'filename': document.original_filename,
+            'months': result,
+            'total': {
+                'income': cumulative_income,
+                'expense': cumulative_expense,
+                'net': cumulative_income - cumulative_expense,
+                'transaction_count': sum(m['count'] for m in result),
+            }
+        })
+
+    # ========================
+    # 거래처 추출
+    # ========================
+
+    @action(detail=True, methods=['post'])
+    def extract_vendors(self, request, pk=None):
+        """거래 내역에서 거래처를 자동 추출하여 Vendor 모델에 저장"""
+        document = self.get_object()
+        
+        try:
+            extracted = document.extracted_data
+        except ExtractedData.DoesNotExist:
+            return Response({'error': '추출된 데이터가 없습니다.'}, status=status.HTTP_404_NOT_FOUND)
+        
+        sd = extracted.structured_data
+        headers = sd.get('headers', [])
+        rows = sd.get('rows', [])
+        
+        fin_cols = detect_financial_columns(headers)
+        desc_idx = fin_cols.get('description')
+        income_idx = fin_cols.get('income')
+        expense_idx = fin_cols.get('expense')
+        
+        if desc_idx is None:
+            return Response({'error': '적요 열을 감지할 수 없습니다.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 거래처별 집계
+        vendor_stats = defaultdict(lambda: {
+            'total_income': 0, 'total_expense': 0, 'count': 0, 'category': '미분류'
+        })
+        
+        for row in rows:
+            if desc_idx >= len(row) or not row[desc_idx]:
+                continue
+            
+            desc = str(row[desc_idx]).strip()
+            if not desc:
+                continue
+            
+            # 거래처명 추출 (적요에서 주요 키워드 제거)
+            vendor_name = _extract_vendor_name(desc)
+            if not vendor_name or len(vendor_name) < 2:
+                continue
+            
+            vendor_stats[vendor_name]['count'] += 1
+            vendor_stats[vendor_name]['category'] = classify_transaction(desc)
+            
+            if income_idx is not None and income_idx < len(row):
+                try:
+                    val = row[income_idx]
+                    amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if not math.isnan(amount):
+                        vendor_stats[vendor_name]['total_income'] += amount
+                except:
+                    pass
+            
+            if expense_idx is not None and expense_idx < len(row):
+                try:
+                    val = row[expense_idx]
+                    amount = float(str(val).replace(',', '').replace('원', '').strip()) if val else 0
+                    if not math.isnan(amount):
+                        vendor_stats[vendor_name]['total_expense'] += amount
+                except:
+                    pass
+        
+        # Vendor 모델에 저장
+        created_count = 0
+        updated_count = 0
+        for name, stats in vendor_stats.items():
+            if stats['count'] < 1:
+                continue
+            
+            vendor_type = 'customer' if stats['total_income'] > stats['total_expense'] else 'supplier'
+            
+            vendor, created = Vendor.objects.update_or_create(
+                user=request.user,
+                name=name,
+                defaults={
+                    'vendor_type': vendor_type,
+                    'category': stats['category'],
+                    'total_income': stats['total_income'],
+                    'total_expense': stats['total_expense'],
+                    'transaction_count': stats['count'],
+                }
+            )
+            if created:
+                created_count += 1
+            else:
+                updated_count += 1
+        
+        return Response({
+            'message': f'거래처 {created_count}개 생성, {updated_count}개 갱신',
+            'total_vendors': created_count + updated_count,
+        })
+
 
 class ExtractedDataViewSet(viewsets.ReadOnlyModelViewSet):
     """추출 데이터 뷰셋 (읽기 전용)"""
@@ -834,3 +1462,106 @@ class ColumnMappingTemplateViewSet(viewsets.ModelViewSet):
         return ColumnMappingTemplate.objects.filter(
             Q(user=self.request.user) | Q(is_public=True)
         )
+
+
+# ========================
+# 거래처 관리 뷰셋
+# ========================
+
+class VendorViewSet(viewsets.ModelViewSet):
+    """거래처 관리 뷰셋"""
+    serializer_class = VendorSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['vendor_type', 'category']
+    search_fields = ['name', 'business_number', 'memo']
+    ordering_fields = ['name', 'total_income', 'total_expense', 'transaction_count', 'created_at']
+    ordering = ['-transaction_count']
+    
+    def get_queryset(self):
+        return Vendor.objects.filter(user=self.request.user)
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+    
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """거래처 요약 통계"""
+        vendors = self.get_queryset()
+        
+        total_vendors = vendors.count()
+        customers = vendors.filter(vendor_type='customer')
+        suppliers = vendors.filter(vendor_type='supplier')
+        
+        from django.db.models import Sum
+        
+        return Response({
+            'total_vendors': total_vendors,
+            'customers': {
+                'count': customers.count(),
+                'total_income': customers.aggregate(s=Sum('total_income'))['s'] or 0,
+            },
+            'suppliers': {
+                'count': suppliers.count(),
+                'total_expense': suppliers.aggregate(s=Sum('total_expense'))['s'] or 0,
+            },
+        })
+
+
+# ========================
+# 세금 달력 API
+# ========================
+
+from rest_framework.decorators import api_view, permission_classes as perm_classes
+from rest_framework.permissions import IsAuthenticated as IsAuth
+
+
+@api_view(['GET'])
+@perm_classes([IsAuth])
+def tax_calendar_api(request):
+    """세금 달력 API
+    
+    쿼리 파라미터:
+    - year: 연도 (기본 현재년)
+    - month: 월 (필터, 미지정시 전체)
+    """
+    year = int(request.query_params.get('year', date.today().year))
+    month = request.query_params.get('month')
+    
+    events = []
+    today = date.today()
+    
+    for item in TAX_CALENDAR:
+        if month and item['month'] != int(month):
+            continue
+        
+        try:
+            event_date = date(year, item['month'], item['day'])
+        except ValueError:
+            continue
+        
+        days_until = (event_date - today).days
+        
+        events.append({
+            'date': event_date.isoformat(),
+            'month': item['month'],
+            'day': item['day'],
+            'title': item['title'],
+            'description': item['desc'],
+            'type': item['type'],
+            'days_until': days_until,
+            'status': 'overdue' if days_until < 0 else ('upcoming' if days_until <= 7 else 'future'),
+        })
+    
+    # 가까운 일정 순서
+    events.sort(key=lambda x: x['date'])
+    
+    # 다음 다가오는 일정
+    upcoming = [e for e in events if e['days_until'] >= 0]
+    
+    return Response({
+        'year': year,
+        'events': events,
+        'next_event': upcoming[0] if upcoming else None,
+        'upcoming_count': len([e for e in upcoming if e['days_until'] <= 30]),
+    })

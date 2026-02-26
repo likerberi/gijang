@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}세금 달력 - 기장{% endblock %}
+{% block nav_tax_calendar %}active{% endblock %}
+{% block page_title %}세금 달력{% endblock %}
+
+{% block extra_head %}
+<style>
+.cal-header { display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem; }
+.cal-header select { height: 36px; padding: 0 .75rem; border: 1px solid var(--c-gray-200); border-radius: 8px; font-size: .9rem; }
+
+/* 다음 일정 배너 */
+.next-event { background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1.5rem; }
+.next-event .ne-icon { font-size: 2.5rem; }
+.next-event .ne-info { flex: 1; }
+.next-event .ne-title { font-size: 1.2rem; font-weight: 700; margin-bottom: .25rem; }
+.next-event .ne-date { font-size: .9rem; opacity: .9; }
+.next-event .ne-days { font-size: 2rem; font-weight: 800; text-align: right; min-width: 100px; }
+.next-event .ne-days-label { font-size: .75rem; font-weight: 400; }
+
+/* 월별 그리드 */
+.cal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.cal-month { background: #fff; border-radius: 12px; padding: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.cal-month-title { font-weight: 700; font-size: .95rem; margin-bottom: .75rem; padding-bottom: .5rem; border-bottom: 2px solid var(--c-gray-100); }
+.cal-event { padding: .5rem; border-radius: 6px; margin-bottom: .4rem; font-size: .8rem; cursor: pointer; }
+.cal-event:hover { opacity: .85; }
+.cal-event.monthly { background: #f0fdf4; border-left: 3px solid #10b981; }
+.cal-event.quarterly { background: #eff6ff; border-left: 3px solid #2563eb; }
+.cal-event.annual { background: #fef3c7; border-left: 3px solid #f59e0b; }
+.cal-event.overdue { background: #fef2f2; border-left: 3px solid #ef4444; }
+.cal-event .ce-day { font-weight: 600; margin-right: .25rem; }
+.cal-event .ce-title { }
+.cal-event .ce-status { float: right; font-size: .7rem; padding: .1rem .3rem; border-radius: 3px; }
+.cal-event .ce-status.overdue { background: #ef4444; color: #fff; }
+.cal-event .ce-status.upcoming { background: #f59e0b; color: #fff; }
+
+/* 전체 일정 리스트 */
+.event-list { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.event-list h4 { margin: 0 0 1rem; font-size: 1rem; }
+.el-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.el-table th { background: #f8fafc; padding: .6rem .5rem; text-align: left; border-bottom: 2px solid var(--c-gray-200); }
+.el-table td { padding: .5rem; border-bottom: 1px solid var(--c-gray-100); }
+.el-table tr:hover { background: #f1f5f9; }
+.el-table tr.overdue-row { background: #fef2f2; }
+.el-table tr.upcoming-row { background: #fffbeb; }
+
+.type-tag { font-size: .7rem; padding: .15rem .4rem; border-radius: 3px; }
+.type-tag.monthly { background: #dcfce7; color: #166534; }
+.type-tag.quarterly { background: #dbeafe; color: #1e40af; }
+.type-tag.annual { background: #fef3c7; color: #92400e; }
+
+.days-badge { font-weight: 600; }
+.days-badge.overdue { color: #ef4444; }
+.days-badge.upcoming { color: #f59e0b; }
+.days-badge.future { color: var(--c-gray-400); }
+
+.legend-bar { display: flex; gap: 1.5rem; margin-bottom: 1rem; }
+.legend-bar .lg-item { display: flex; align-items: center; gap: .35rem; font-size: .8rem; }
+.legend-bar .lg-dot { width: 12px; height: 12px; border-radius: 3px; }
+
+@media (max-width: 768px) {
+  .cal-grid { grid-template-columns: repeat(2, 1fr); }
+  .next-event { flex-direction: column; text-align: center; }
+  .next-event .ne-days { min-width: auto; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 연도 선택 -->
+<div class="cal-header">
+  <select id="cal-year"></select>
+  <div class="legend-bar">
+    <div class="lg-item"><div class="lg-dot" style="background:#10b981;"></div> 매월</div>
+    <div class="lg-item"><div class="lg-dot" style="background:#2563eb;"></div> 분기</div>
+    <div class="lg-item"><div class="lg-dot" style="background:#f59e0b;"></div> 연간</div>
+  </div>
+</div>
+
+<!-- 다음 일정 배너 -->
+<div class="next-event" id="next-event" style="display:none;">
+  <div class="ne-icon">⏰</div>
+  <div class="ne-info">
+    <div class="ne-title" id="ne-title">-</div>
+    <div class="ne-date" id="ne-date">-</div>
+    <div id="ne-desc" style="font-size:.85rem;opacity:.8;margin-top:.25rem;"></div>
+  </div>
+  <div class="ne-days">
+    <span id="ne-days-num">-</span>
+    <div class="ne-days-label">일 남음</div>
+  </div>
+</div>
+
+<!-- 월별 달력 그리드 -->
+<div class="cal-grid" id="cal-grid"></div>
+
+<!-- 전체 일정 리스트 -->
+<div class="event-list">
+  <h4>📋 전체 세무 일정</h4>
+  <table class="el-table">
+    <thead>
+      <tr>
+        <th>날짜</th>
+        <th>일정</th>
+        <th>구분</th>
+        <th>설명</th>
+        <th>D-Day</th>
+      </tr>
+    </thead>
+    <tbody id="event-tbody"></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// 연도 셀렉트
+(function() {
+  const sel = document.getElementById('cal-year');
+  const thisYear = new Date().getFullYear();
+  for (let y = thisYear + 1; y >= thisYear - 2; y--) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y + '년';
+    if (y === thisYear) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', loadCalendar);
+})();
+
+function typeTag(t) {
+  const map = { monthly: '매월', quarterly: '분기', annual: '연간' };
+  return `<span class="type-tag ${t}">${map[t] || t}</span>`;
+}
+
+async function loadCalendar() {
+  const year = document.getElementById('cal-year').value;
+  
+  try {
+    const d = await API.get(`/api/documents/tax-calendar/?year=${year}`);
+    const events = d.events || [];
+    
+    // 다음 일정 배너
+    if (d.next_event) {
+      const ne = d.next_event;
+      document.getElementById('next-event').style.display = 'flex';
+      document.getElementById('ne-title').textContent = ne.title;
+      document.getElementById('ne-date').textContent = ne.date;
+      document.getElementById('ne-desc').textContent = ne.description;
+      document.getElementById('ne-days-num').textContent = ne.days_until;
+    } else {
+      document.getElementById('next-event').style.display = 'none';
+    }
+    
+    // 월별 그리드
+    const grid = document.getElementById('cal-grid');
+    let gridHtml = '';
+    
+    for (let m = 1; m <= 12; m++) {
+      const monthEvents = events.filter(e => e.month === m);
+      gridHtml += `<div class="cal-month">
+        <div class="cal-month-title">${m}월</div>`;
+      
+      if (monthEvents.length === 0) {
+        gridHtml += '<div style="font-size:.8rem;color:var(--c-gray-400);">일정 없음</div>';
+      } else {
+        for (const ev of monthEvents) {
+          let statusHtml = '';
+          if (ev.status === 'overdue') statusHtml = '<span class="ce-status overdue">지남</span>';
+          else if (ev.status === 'upcoming') statusHtml = '<span class="ce-status upcoming">임박</span>';
+          
+          const evClass = ev.status === 'overdue' ? 'overdue' : ev.type;
+          gridHtml += `<div class="cal-event ${evClass}" title="${escapeHtml(ev.description)}">
+            <span class="ce-day">${ev.day}일</span>
+            <span class="ce-title">${escapeHtml(ev.title)}</span>
+            ${statusHtml}
+          </div>`;
+        }
+      }
+      gridHtml += '</div>';
+    }
+    grid.innerHTML = gridHtml;
+    
+    // 전체 테이블
+    const tbody = document.getElementById('event-tbody');
+    tbody.innerHTML = events.map(ev => {
+      let rowClass = '';
+      if (ev.status === 'overdue') rowClass = 'overdue-row';
+      else if (ev.status === 'upcoming') rowClass = 'upcoming-row';
+      
+      let dday = '';
+      if (ev.days_until === 0) dday = '<span class="days-badge upcoming">D-Day</span>';
+      else if (ev.days_until > 0) dday = `<span class="days-badge ${ev.status}">D-${ev.days_until}</span>`;
+      else dday = `<span class="days-badge overdue">D+${Math.abs(ev.days_until)}</span>`;
+      
+      return `<tr class="${rowClass}">
+        <td><strong>${ev.date}</strong></td>
+        <td>${escapeHtml(ev.title)}</td>
+        <td>${typeTag(ev.type)}</td>
+        <td>${escapeHtml(ev.description)}</td>
+        <td>${dday}</td>
+      </tr>`;
+    }).join('');
+    
+  } catch(err) {
+    console.error('Calendar load error:', err);
+    showToast('세금 달력 로드 실패: ' + (err.message || ''), 'error');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', loadCalendar);
+</script>
+{% endblock %}

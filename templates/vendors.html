@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block title %}거래처 관리 - 기장{% endblock %}
+{% block nav_vendors %}active{% endblock %}
+{% block page_title %}거래처 관리{% endblock %}
+
+{% block top_actions %}
+<button class="btn btn-primary" onclick="showAddVendor()">+ 거래처 추가</button>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.vendor-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.vs-card { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.vs-card .vs-label { font-size: .8rem; color: var(--c-gray-500); margin-bottom: .25rem; }
+.vs-card .vs-value { font-size: 1.5rem; font-weight: 700; }
+
+.vendor-toolbar { display: flex; gap: .75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+.vendor-toolbar input, .vendor-toolbar select { height: 36px; padding: 0 .75rem; border: 1px solid var(--c-gray-200); border-radius: 8px; font-size: .85rem; }
+.vendor-toolbar .search { flex: 1; min-width: 200px; }
+
+.vendor-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.vendor-table th { background: #f8fafc; padding: .6rem .5rem; text-align: left; border-bottom: 2px solid var(--c-gray-200); cursor: pointer; }
+.vendor-table th:hover { background: #e2e8f0; }
+.vendor-table td { padding: .5rem; border-bottom: 1px solid var(--c-gray-100); }
+.vendor-table tr:hover { background: #f1f5f9; }
+.vendor-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.type-badge { font-size: .75rem; padding: .15rem .5rem; border-radius: 4px; }
+.type-customer { background: #dcfce7; color: #166534; }
+.type-supplier { background: #fee2e2; color: #991b1b; }
+.type-both { background: #e0e7ff; color: #3730a3; }
+
+.vendor-actions { display: flex; gap: .25rem; }
+.vendor-actions button { padding: .2rem .5rem; font-size: .75rem; border: 1px solid var(--c-gray-200); border-radius: 4px; background: #fff; cursor: pointer; }
+.vendor-actions button:hover { background: #f1f5f9; }
+
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: .75rem; }
+.form-group { margin-bottom: .5rem; }
+.form-group label { display: block; font-size: .8rem; font-weight: 500; margin-bottom: .25rem; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; height: 36px; padding: 0 .75rem; border: 1px solid var(--c-gray-200);
+  border-radius: 8px; font-size: .85rem; box-sizing: border-box;
+}
+.form-group textarea { height: 60px; padding: .5rem .75rem; resize: vertical; }
+
+@media (max-width: 768px) {
+  .vendor-stats { grid-template-columns: 1fr; }
+  .form-row { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 통계 카드 -->
+<div class="vendor-stats" id="vendor-stats">
+  <div class="vs-card">
+    <div class="vs-label">전체 거래처</div>
+    <div class="vs-value" id="vs-total">-</div>
+  </div>
+  <div class="vs-card">
+    <div class="vs-label">매출처 (고객)</div>
+    <div class="vs-value" id="vs-customers" style="color:#10b981;">-</div>
+  </div>
+  <div class="vs-card">
+    <div class="vs-label">매입처 (거래처)</div>
+    <div class="vs-value" id="vs-suppliers" style="color:#ef4444;">-</div>
+  </div>
+</div>
+
+<!-- 툴바 -->
+<div class="section" style="background:#fff;border-radius:12px;padding:1.25rem;box-shadow:0 1px 4px rgba(0,0,0,.06);">
+  <div class="vendor-toolbar">
+    <input type="text" class="search" id="vendor-search" placeholder="🔍 거래처명, 사업자번호 검색...">
+    <select id="vendor-type-filter">
+      <option value="">전체 유형</option>
+      <option value="customer">매출처</option>
+      <option value="supplier">매입처</option>
+      <option value="both">겸용</option>
+    </select>
+  </div>
+  
+  <div style="overflow-x:auto;">
+    <table class="vendor-table" id="vendor-table">
+      <thead>
+        <tr>
+          <th>거래처명</th>
+          <th>유형</th>
+          <th>계정과목</th>
+          <th>사업자번호</th>
+          <th style="text-align:right">입금액</th>
+          <th style="text-align:right">출금액</th>
+          <th style="text-align:right">거래건수</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="vendor-tbody">
+        <tr><td colspan="8" class="empty-state">로딩 중...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function money(v) {
+  if (v == null || isNaN(v) || v === 0) return '-';
+  return Math.round(v).toLocaleString() + '원';
+}
+
+function typeBadge(t) {
+  const map = {
+    customer: ['매출처', 'type-customer'],
+    supplier: ['매입처', 'type-supplier'],
+    both: ['겸용', 'type-both'],
+  };
+  const [label, cls] = map[t] || [t, ''];
+  return `<span class="type-badge ${cls}">${label}</span>`;
+}
+
+async function loadVendors() {
+  try {
+    const search = document.getElementById('vendor-search').value;
+    const typeFilter = document.getElementById('vendor-type-filter').value;
+    
+    let url = '/api/documents/vendors/?ordering=-transaction_count';
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (typeFilter) url += `&vendor_type=${typeFilter}`;
+    
+    const [vendors, summary] = await Promise.all([
+      API.get(url),
+      API.get('/api/documents/vendors/summary/'),
+    ]);
+    
+    // 통계
+    document.getElementById('vs-total').textContent = summary.total_vendors;
+    document.getElementById('vs-customers').textContent = summary.customers.count;
+    document.getElementById('vs-suppliers').textContent = summary.suppliers.count;
+    
+    // 테이블
+    const results = vendors.results || vendors;
+    const tbody = document.getElementById('vendor-tbody');
+    
+    if ((!Array.isArray(results) && !results.length) || (Array.isArray(results) && results.length === 0)) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-state">등록된 거래처가 없습니다. 거래내역에서 자동 추출하거나 직접 추가해보세요.</td></tr>';
+      return;
+    }
+    
+    const list = Array.isArray(results) ? results : [results];
+    tbody.innerHTML = list.map(v => `
+      <tr>
+        <td><strong>${escapeHtml(v.name)}</strong></td>
+        <td>${typeBadge(v.vendor_type)}</td>
+        <td>${v.category ? `<span class="cat-badge" style="font-size:.75rem;padding:.1rem .4rem;border-radius:4px;background:#e0e7ff;color:#3730a3;">${escapeHtml(v.category)}</span>` : '-'}</td>
+        <td>${v.business_number || '-'}</td>
+        <td class="num" style="color:#10b981;">${money(v.total_income)}</td>
+        <td class="num" style="color:#ef4444;">${money(v.total_expense)}</td>
+        <td class="num">${v.transaction_count}건</td>
+        <td class="vendor-actions">
+          <button onclick="editVendor(${v.id})">✏️</button>
+          <button onclick="deleteVendor(${v.id}, '${escapeHtml(v.name)}')">🗑</button>
+        </td>
+      </tr>
+    `).join('');
+    
+  } catch(err) {
+    console.error('Vendor load error:', err);
+    showToast('거래처 불러오기 실패: ' + (err.message || ''), 'error');
+  }
+}
+
+function showAddVendor() {
+  showModal('거래처 추가', `
+    <div class="form-row">
+      <div class="form-group">
+        <label>거래처명 *</label>
+        <input type="text" id="v-name" required>
+      </div>
+      <div class="form-group">
+        <label>유형</label>
+        <select id="v-type">
+          <option value="supplier">매입처 (거래처)</option>
+          <option value="customer">매출처 (고객)</option>
+          <option value="both">겸용</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>사업자번호</label>
+        <input type="text" id="v-biznum" placeholder="000-00-00000">
+      </div>
+      <div class="form-group">
+        <label>계정과목</label>
+        <input type="text" id="v-category" placeholder="예: 외주비, 소모품비">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>담당자명</label>
+        <input type="text" id="v-contact">
+      </div>
+      <div class="form-group">
+        <label>전화번호</label>
+        <input type="text" id="v-phone">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>이메일</label>
+      <input type="email" id="v-email">
+    </div>
+    <div class="form-group">
+      <label>메모</label>
+      <textarea id="v-memo"></textarea>
+    </div>
+  `, `<button class="btn btn-primary" onclick="saveVendor()">저장</button>
+     <button class="btn btn-ghost" onclick="closeModal()">취소</button>`);
+}
+
+async function saveVendor(vendorId) {
+  const data = {
+    name: document.getElementById('v-name').value,
+    vendor_type: document.getElementById('v-type').value,
+    business_number: document.getElementById('v-biznum').value,
+    category: document.getElementById('v-category').value,
+    contact_name: document.getElementById('v-contact').value,
+    phone: document.getElementById('v-phone').value,
+    email: document.getElementById('v-email').value,
+    memo: document.getElementById('v-memo').value,
+  };
+  
+  if (!data.name) {
+    showToast('거래처명을 입력해주세요.', 'error');
+    return;
+  }
+  
+  try {
+    if (vendorId) {
+      await API.put(`/api/documents/vendors/${vendorId}/`, data);
+      showToast('거래처가 수정되었습니다.');
+    } else {
+      await API.post('/api/documents/vendors/', data);
+      showToast('거래처가 추가되었습니다.');
+    }
+    closeModal();
+    loadVendors();
+  } catch(err) {
+    showToast(err.message || '저장 실패', 'error');
+  }
+}
+
+async function editVendor(id) {
+  try {
+    const v = await API.get(`/api/documents/vendors/${id}/`);
+    showModal('거래처 수정', `
+      <div class="form-row">
+        <div class="form-group">
+          <label>거래처명 *</label>
+          <input type="text" id="v-name" value="${escapeHtml(v.name || '')}">
+        </div>
+        <div class="form-group">
+          <label>유형</label>
+          <select id="v-type">
+            <option value="supplier" ${v.vendor_type==='supplier'?'selected':''}>매입처</option>
+            <option value="customer" ${v.vendor_type==='customer'?'selected':''}>매출처</option>
+            <option value="both" ${v.vendor_type==='both'?'selected':''}>겸용</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>사업자번호</label>
+          <input type="text" id="v-biznum" value="${escapeHtml(v.business_number || '')}">
+        </div>
+        <div class="form-group">
+          <label>계정과목</label>
+          <input type="text" id="v-category" value="${escapeHtml(v.category || '')}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>담당자명</label>
+          <input type="text" id="v-contact" value="${escapeHtml(v.contact_name || '')}">
+        </div>
+        <div class="form-group">
+          <label>전화번호</label>
+          <input type="text" id="v-phone" value="${escapeHtml(v.phone || '')}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>이메일</label>
+        <input type="email" id="v-email" value="${escapeHtml(v.email || '')}">
+      </div>
+      <div class="form-group">
+        <label>메모</label>
+        <textarea id="v-memo">${escapeHtml(v.memo || '')}</textarea>
+      </div>
+    `, `<button class="btn btn-primary" onclick="saveVendor(${id})">수정</button>
+       <button class="btn btn-ghost" onclick="closeModal()">취소</button>`);
+  } catch(err) {
+    showToast('거래처 정보 로드 실패', 'error');
+  }
+}
+
+async function deleteVendor(id, name) {
+  if (!confirm(`"${name}" 거래처를 삭제하시겠습니까?`)) return;
+  try {
+    await API.delete(`/api/documents/vendors/${id}/`);
+    showToast('거래처가 삭제되었습니다.');
+    loadVendors();
+  } catch(err) {
+    showToast(err.message || '삭제 실패', 'error');
+  }
+}
+
+// 검색
+let searchTimer;
+document.getElementById('vendor-search').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadVendors, 400);
+});
+document.getElementById('vendor-type-filter').addEventListener('change', loadVendors);
+
+document.addEventListener('DOMContentLoaded', loadVendors);
+</script>
+{% endblock %}

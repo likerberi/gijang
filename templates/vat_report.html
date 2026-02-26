@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}부가세 신고서 - 기장{% endblock %}
+{% block nav_documents %}active{% endblock %}
+{% block page_title %}부가세 신고서{% endblock %}
+
+{% block top_actions %}
+<button class="btn btn-ghost" onclick="location.href='/app/documents/{{ doc_id }}/'">← 거래내역</button>
+<button class="btn btn-primary" id="btn-download-vat">📥 부가세 엑셀 다운로드</button>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.vat-header { display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+.vat-period { display: flex; gap: .5rem; align-items: center; }
+.vat-period select { height: 36px; padding: 0 .75rem; border: 1px solid var(--c-gray-200); border-radius: 8px; font-size: .9rem; }
+
+.vat-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 2rem; }
+.vat-card { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center; }
+.vat-card.sales { border-top: 4px solid #10b981; }
+.vat-card.purchase { border-top: 4px solid #ef4444; }
+.vat-card.payable { border-top: 4px solid #2563eb; }
+.vat-card .card-label { font-size: .85rem; color: var(--c-gray-500); margin-bottom: .5rem; }
+.vat-card .card-amount { font-size: 1.1rem; margin-bottom: .25rem; }
+.vat-card .card-vat { font-size: 1.8rem; font-weight: 700; }
+.vat-card.sales .card-vat { color: #10b981; }
+.vat-card.purchase .card-vat { color: #ef4444; }
+.vat-card.payable .card-vat { color: #2563eb; }
+
+.vat-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }
+.vat-section { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.vat-section h4 { margin: 0 0 1rem; font-size: 1rem; display: flex; align-items: center; gap: .5rem; }
+.vat-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.vat-table th { background: #f8fafc; padding: .6rem .5rem; text-align: left; border-bottom: 2px solid var(--c-gray-200); }
+.vat-table td { padding: .5rem; border-bottom: 1px solid var(--c-gray-100); }
+.vat-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.cat-badge { font-size: .75rem; padding: .15rem .4rem; border-radius: 4px; background: #e0e7ff; color: #3730a3; }
+
+.payable-box { background: #fff; border-radius: 12px; padding: 2rem; box-shadow: 0 2px 8px rgba(0,0,0,.08); text-align: center; margin-bottom: 1.5rem; }
+.payable-box .pb-label { font-size: 1rem; color: var(--c-gray-500); margin-bottom: .5rem; }
+.payable-box .pb-amount { font-size: 2.5rem; font-weight: 800; color: #2563eb; }
+.payable-box .pb-formula { font-size: .9rem; color: var(--c-gray-400); margin-top: .5rem; }
+
+@media (max-width: 768px) {
+  .vat-summary { grid-template-columns: 1fr; }
+  .vat-detail { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 기간 선택 -->
+<div class="vat-header">
+  <div class="vat-period">
+    <select id="vat-year"></select>
+    <select id="vat-quarter">
+      <option value="">전체</option>
+      <option value="1">1기 (1~3월)</option>
+      <option value="2">2기 (4~6월)</option>
+      <option value="3">3기 (7~9월)</option>
+      <option value="4">4기 (10~12월)</option>
+    </select>
+    <button class="btn btn-primary btn-sm" onclick="loadVAT()">조회</button>
+  </div>
+  <span class="text-muted" style="font-size:.85rem;" id="vat-period-label"></span>
+</div>
+
+<!-- 납부 세액 -->
+<div class="payable-box" id="payable-box" style="display:none;">
+  <div class="pb-label" id="pb-label">납부할 세액</div>
+  <div class="pb-amount" id="pb-amount">-</div>
+  <div class="pb-formula" id="pb-formula"></div>
+</div>
+
+<!-- 매출/매입/납부 세액 카드 -->
+<div class="vat-summary" id="vat-summary" style="display:none;">
+  <div class="vat-card sales">
+    <div class="card-label">매출 세액</div>
+    <div class="card-amount" id="sales-supply">공급가액: -</div>
+    <div class="card-vat" id="sales-vat">-</div>
+  </div>
+  <div class="vat-card purchase">
+    <div class="card-label">매입 세액</div>
+    <div class="card-amount" id="purchase-supply">공급가액: -</div>
+    <div class="card-vat" id="purchase-vat">-</div>
+  </div>
+  <div class="vat-card payable">
+    <div class="card-label">매출 건수 / 매입 건수</div>
+    <div class="card-vat" id="vat-counts">- / -</div>
+  </div>
+</div>
+
+<!-- 매입 카테고리별 -->
+<div class="vat-detail" id="vat-detail" style="display:none;">
+  <div class="vat-section">
+    <h4>📈 매출 상위 내역</h4>
+    <div style="overflow-x:auto; max-height:400px;">
+      <table class="vat-table" id="sales-table">
+        <thead><tr><th>날짜</th><th>적요</th><th>계정과목</th><th style="text-align:right">금액</th><th style="text-align:right">세액</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="vat-section">
+    <h4>📉 매입 카테고리별 합계</h4>
+    <div style="overflow-x:auto; max-height:400px;">
+      <table class="vat-table" id="purchase-cat-table">
+        <thead><tr><th>계정과목</th><th style="text-align:right">건수</th><th style="text-align:right">금액</th><th style="text-align:right">세액</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="empty-state">데이터를 불러오는 중...</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const DOC_ID = {{ doc_id }};
+
+function money(v) {
+  if (v == null || isNaN(v)) return '-';
+  return Math.round(v).toLocaleString() + '원';
+}
+
+// 연도 셀렉트 초기화
+(function() {
+  const sel = document.getElementById('vat-year');
+  const thisYear = new Date().getFullYear();
+  for (let y = thisYear; y >= thisYear - 3; y--) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y + '년';
+    sel.appendChild(opt);
+  }
+})();
+
+async function loadVAT() {
+  const year = document.getElementById('vat-year').value;
+  const quarter = document.getElementById('vat-quarter').value;
+  
+  let url = `/api/documents/documents/${DOC_ID}/vat_report/?year=${year}`;
+  if (quarter) url += `&quarter=${quarter}`;
+  
+  document.getElementById('loading').style.display = 'block';
+  
+  try {
+    const d = await API.get(url);
+    document.getElementById('loading').style.display = 'none';
+    
+    // 기간 표시
+    document.getElementById('vat-period-label').textContent = d.period.description;
+    
+    // 납부 세액
+    const box = document.getElementById('payable-box');
+    box.style.display = 'block';
+    const payable = d.summary.payable_vat;
+    document.getElementById('pb-label').textContent = payable >= 0 ? '납부할 세액' : '환급받을 세액';
+    document.getElementById('pb-amount').textContent = money(Math.abs(payable));
+    document.getElementById('pb-amount').style.color = payable >= 0 ? '#2563eb' : '#10b981';
+    document.getElementById('pb-formula').textContent = 
+      `매출세액 ${money(d.summary.sales_vat)} - 매입세액 ${money(d.summary.purchase_vat)}`;
+    
+    // 카드
+    document.getElementById('vat-summary').style.display = 'grid';
+    document.getElementById('sales-supply').textContent = '공급가액: ' + money(d.sales.supply_value);
+    document.getElementById('sales-vat').textContent = money(d.sales.vat);
+    document.getElementById('purchase-supply').textContent = '공급가액: ' + money(d.purchases.supply_value);
+    document.getElementById('purchase-vat').textContent = money(d.purchases.vat);
+    document.getElementById('vat-counts').textContent = `${d.sales.count}건 / ${d.purchases.count}건`;
+    
+    // 상세
+    document.getElementById('vat-detail').style.display = 'grid';
+    
+    // 매출 상위 내역
+    const salesTbody = document.querySelector('#sales-table tbody');
+    const salesItems = (d.sales.items || []).sort((a, b) => b.amount - a.amount).slice(0, 20);
+    salesTbody.innerHTML = salesItems.map(item => `
+      <tr>
+        <td>${escapeHtml(item.date)}</td>
+        <td>${escapeHtml(item.description)}</td>
+        <td><span class="cat-badge">${escapeHtml(item.category)}</span></td>
+        <td class="num">${money(item.amount)}</td>
+        <td class="num">${money(item.vat)}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" class="empty-state">매출 데이터 없음</td></tr>';
+    
+    // 매입 카테고리별
+    const purchCatTbody = document.querySelector('#purchase-cat-table tbody');
+    const cats = d.purchases.by_category || {};
+    const catEntries = Object.entries(cats).sort((a,b) => b[1].amount - a[1].amount);
+    purchCatTbody.innerHTML = catEntries.map(([cat, info]) => `
+      <tr>
+        <td><span class="cat-badge">${escapeHtml(cat)}</span></td>
+        <td class="num">${info.count}</td>
+        <td class="num">${money(info.amount)}</td>
+        <td class="num">${money(info.vat)}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="4" class="empty-state">매입 데이터 없음</td></tr>';
+    
+  } catch(err) {
+    document.getElementById('loading').innerHTML = `<span style="color:#ef4444;">오류: ${err.message || '데이터 로드 실패'}</span>`;
+  }
+}
+
+// 다운로드
+document.getElementById('btn-download-vat').addEventListener('click', async () => {
+  try {
+    const year = document.getElementById('vat-year').value;
+    const quarter = document.getElementById('vat-quarter').value;
+    
+    let url = `/api/documents/documents/${DOC_ID}/vat_download/?year=${year}`;
+    if (quarter) url += `&quarter=${quarter}`;
+    
+    const token = API.getToken();
+    let resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (resp.status === 401) {
+      await API.refreshToken();
+      resp = await fetch(url, { headers: { 'Authorization': `Bearer ${API.getToken()}` } });
+    }
+    if (!resp.ok) throw new Error('다운로드 실패');
+    
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `부가세신고_${DOC_ID}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    showToast('부가세 엑셀 다운로드 완료');
+  } catch(err) {
+    showToast(err.message || '다운로드 실패', 'error');
+  }
+});
+
+document.addEventListener('DOMContentLoaded', loadVAT);
+</script>
+{% endblock %}

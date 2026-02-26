@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Document, ExtractedData, Report, MergeProject, MergeFile, ColumnMappingTemplate
+from .models import Document, ExtractedData, Report, MergeProject, MergeFile, ColumnMappingTemplate, Vendor, TaxEvent
 
 
 @admin.register(Document)
@@ -71,4 +71,23 @@ class ReportAdmin(admin.ModelAdmin):
     search_fields = ('title', 'summary', 'document__original_filename')
     readonly_fields = ('created_at', 'updated_at')
     ordering = ('-created_at',)
+
+
+@admin.register(Vendor)
+class VendorAdmin(admin.ModelAdmin):
+    list_display = ('name', 'vendor_type', 'category', 'transaction_count',
+                   'total_income', 'total_expense', 'user', 'created_at')
+    list_filter = ('vendor_type', 'category', 'created_at')
+    search_fields = ('name', 'business_number', 'memo', 'user__username')
+    readonly_fields = ('created_at', 'updated_at')
+    ordering = ('-transaction_count',)
+
+
+@admin.register(TaxEvent)
+class TaxEventAdmin(admin.ModelAdmin):
+    list_display = ('title', 'due_date', 'is_completed', 'amount', 'user', 'created_at')
+    list_filter = ('is_completed', 'due_date')
+    search_fields = ('title', 'description', 'user__username')
+    readonly_fields = ('created_at', 'updated_at')
+    ordering = ('due_date',)
 

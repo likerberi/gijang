@@ -50,6 +50,16 @@
       <div class="action-title">거래내역 업로드</div>
       <div class="action-desc">은행/카드 거래 엑셀을 업로드하면 자동 분석합니다</div>
     </a>
+    <a href="/app/vendors/" class="action-card">
+      <div class="action-icon">🏢</div>
+      <div class="action-title">거래처 관리</div>
+      <div class="action-desc">매출처/매입처를 관리하고 거래 통계를 확인합니다</div>
+    </a>
+    <a href="/app/tax-calendar/" class="action-card">
+      <div class="action-icon">📅</div>
+      <div class="action-title">세금 달력</div>
+      <div class="action-desc">부가세·원천세·종합소득세 일정을 한눈에 확인합니다</div>
+    </a>
     <a href="/app/merge/" class="action-card">
       <div class="action-icon">🔗</div>
       <div class="action-title">파일 병합</div>
@@ -60,6 +70,22 @@
       <div class="action-title">매핑 템플릿</div>
       <div class="action-desc">은행/카드사별 열 이름 매핑을 저장하고 재사용합니다</div>
     </a>
+  </div>
+</div>
+
+<!-- 다음 세금 일정 -->
+<div class="section" id="tax-next-section" style="display:none;">
+  <div style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:#fff;border-radius:12px;padding:1.25rem;display:flex;align-items:center;gap:1.5rem;">
+    <div style="font-size:2rem;">⏰</div>
+    <div style="flex:1;">
+      <div style="font-weight:700;font-size:1.1rem;" id="tax-next-title">-</div>
+      <div style="font-size:.85rem;opacity:.85;" id="tax-next-desc">-</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:1.8rem;font-weight:800;" id="tax-next-days">-</div>
+      <div style="font-size:.75rem;">일 남음</div>
+    </div>
+    <a href="/app/tax-calendar/" class="btn btn-sm" style="background:rgba(255,255,255,.2);color:#fff;border:none;">달력 보기 →</a>
   </div>
 </div>
 
@@ -153,6 +179,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch (err) {
     console.error('Dashboard load error:', err);
   }
+
+  // 다음 세금 일정
+  try {
+    const cal = await API.get('/api/documents/tax-calendar/');
+    if (cal.next_event) {
+      const ne = cal.next_event;
+      document.getElementById('tax-next-section').style.display = 'block';
+      document.getElementById('tax-next-title').textContent = `${ne.date} - ${ne.title}`;
+      document.getElementById('tax-next-desc').textContent = ne.description;
+      document.getElementById('tax-next-days').textContent = ne.days_until;
+    }
+  } catch(e) {}
 });
 </script>
 {% endblock %}
