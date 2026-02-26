@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}월별 손익 리포트 - 기장{% endblock %}
+{% block nav_documents %}active{% endblock %}
+{% block page_title %}월별 손익 리포트{% endblock %}
+
+{% block top_actions %}
+<button class="btn btn-ghost" onclick="location.href='/app/documents/{{ doc_id }}/'">← 거래내역</button>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.report-total { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+.rt-card { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.rt-card .rt-label { font-size: .8rem; color: var(--c-gray-500); margin-bottom: .25rem; }
+.rt-card .rt-value { font-size: 1.5rem; font-weight: 700; }
+.rt-card.income { border-left: 4px solid #10b981; }
+.rt-card.income .rt-value { color: #10b981; }
+.rt-card.expense { border-left: 4px solid #ef4444; }
+.rt-card.expense .rt-value { color: #ef4444; }
+.rt-card.net { border-left: 4px solid #2563eb; }
+.rt-card.net .rt-value { color: #2563eb; }
+.rt-card.count { border-left: 4px solid #8b5cf6; }
+
+/* 월별 차트 */
+.chart-section { background: #fff; border-radius: 12px; padding: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 1.5rem; }
+.chart-section h4 { margin: 0 0 1rem; font-size: 1rem; }
+.month-chart { display: flex; gap: 2px; align-items: flex-end; height: 250px; padding: 0; }
+.month-bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; height: 100%; justify-content: flex-end; }
+.month-bars { display: flex; gap: 2px; align-items: flex-end; width: 100%; justify-content: center; }
+.month-bar { width: 16px; border-radius: 3px 3px 0 0; min-height: 2px; transition: height .4s ease; }
+.month-bar.inc { background: #10b981; }
+.month-bar.exp { background: #ef4444; }
+.month-label { font-size: .7rem; color: var(--c-gray-500); margin-top: 4px; white-space: nowrap; }
+
+/* 월별 테이블 */
+.month-table-wrap { background: #fff; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 1.5rem; }
+.month-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.month-table th { background: #f8fafc; padding: .6rem .5rem; text-align: left; border-bottom: 2px solid var(--c-gray-200); }
+.month-table td { padding: .5rem; border-bottom: 1px solid var(--c-gray-100); }
+.month-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.month-table tr.total-row { background: #f1f5f9; font-weight: 600; }
+.inc-val { color: #10b981; }
+.exp-val { color: #ef4444; }
+.net-val { color: #2563eb; }
+
+/* 카테고리 상세 토글 */
+.cat-detail { display: none; }
+.cat-detail.open { display: table-row; }
+.cat-detail td { padding-left: 2rem; font-size: .8rem; background: #fafbfc; }
+.toggle-btn { cursor: pointer; color: var(--c-primary); text-decoration: underline; font-size: .8rem; }
+
+/* 누적 차트 */
+.cumul-chart { position: relative; height: 200px; margin-top: 1rem; }
+.cumul-line { position: absolute; bottom: 0; width: 3px; border-radius: 2px; }
+.cumul-line.income-line { background: rgba(16,185,129,.3); }
+.cumul-line.expense-line { background: rgba(239,68,68,.3); }
+.cumul-line.net-line { background: rgba(37,99,235,.5); }
+
+.legend { display: flex; gap: 1.5rem; margin-top: .5rem; }
+.legend-item { display: flex; align-items: center; gap: .35rem; font-size: .8rem; color: var(--c-gray-500); }
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+
+@media (max-width: 768px) {
+  .report-total { grid-template-columns: 1fr 1fr; }
+  .month-bar { width: 10px; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="loading" class="empty-state">데이터를 불러오는 중...</div>
+
+<!-- 합계 카드 -->
+<div class="report-total" id="report-total" style="display:none;">
+  <div class="rt-card income">
+    <div class="rt-label">총 수입</div>
+    <div class="rt-value" id="rt-income">-</div>
+  </div>
+  <div class="rt-card expense">
+    <div class="rt-label">총 지출</div>
+    <div class="rt-value" id="rt-expense">-</div>
+  </div>
+  <div class="rt-card net">
+    <div class="rt-label">순이익</div>
+    <div class="rt-value" id="rt-net">-</div>
+  </div>
+  <div class="rt-card count">
+    <div class="rt-label">총 거래</div>
+    <div class="rt-value" id="rt-count">-</div>
+  </div>
+</div>
+
+<!-- 월별 막대 차트 -->
+<div class="chart-section" id="chart-section" style="display:none;">
+  <h4>📊 월별 수입/지출 추이</h4>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#10b981;"></div> 수입</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ef4444;"></div> 지출</div>
+  </div>
+  <div class="month-chart" id="month-chart"></div>
+</div>
+
+<!-- 월별 테이블 -->
+<div class="month-table-wrap" id="table-section" style="display:none;">
+  <h4 style="margin:0 0 1rem;font-size:1rem;">📋 월별 상세</h4>
+  <table class="month-table" id="month-table">
+    <thead>
+      <tr>
+        <th>월</th>
+        <th style="text-align:right">수입</th>
+        <th style="text-align:right">지출</th>
+        <th style="text-align:right">순이익</th>
+        <th style="text-align:right">거래건수</th>
+        <th style="text-align:right">누적 순이익</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="month-tbody"></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const DOC_ID = {{ doc_id }};
+
+function money(v) {
+  if (v == null || isNaN(v)) return '-';
+  return Math.round(v).toLocaleString() + '원';
+}
+
+async function loadReport() {
+  try {
+    const d = await API.get(`/api/documents/documents/${DOC_ID}/monthly_report/`);
+    document.getElementById('loading').style.display = 'none';
+    
+    const months = d.months || [];
+    const total = d.total || {};
+    
+    if (months.length === 0) {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('loading').textContent = '월별 데이터가 없습니다. 날짜 열이 필요합니다.';
+      return;
+    }
+    
+    // 합계 카드
+    document.getElementById('report-total').style.display = 'grid';
+    document.getElementById('rt-income').textContent = money(total.income);
+    document.getElementById('rt-expense').textContent = money(total.expense);
+    document.getElementById('rt-net').textContent = money(total.net);
+    document.getElementById('rt-count').textContent = (total.transaction_count || 0).toLocaleString() + '건';
+    
+    // 막대 차트
+    document.getElementById('chart-section').style.display = 'block';
+    const chartDiv = document.getElementById('month-chart');
+    const maxVal = Math.max(...months.map(m => Math.max(m.income || 0, m.expense || 0)), 1);
+    
+    chartDiv.innerHTML = months.map(m => {
+      const incH = Math.max((m.income / maxVal) * 220, 2);
+      const expH = Math.max((m.expense / maxVal) * 220, 2);
+      return `<div class="month-bar-group">
+        <div class="month-bars">
+          <div class="month-bar inc" style="height:${incH}px" title="수입: ${money(m.income)}"></div>
+          <div class="month-bar exp" style="height:${expH}px" title="지출: ${money(m.expense)}"></div>
+        </div>
+        <div class="month-label">${m.month.substring(5)}</div>
+      </div>`;
+    }).join('');
+    
+    // 테이블
+    document.getElementById('table-section').style.display = 'block';
+    const tbody = document.getElementById('month-tbody');
+    let html = '';
+    
+    months.forEach((m, idx) => {
+      const netClass = m.net >= 0 ? 'net-val' : 'exp-val';
+      const cumulClass = m.cumulative_net >= 0 ? 'net-val' : 'exp-val';
+      const cats = m.categories || {};
+      const hasCats = Object.keys(cats).length > 0;
+      
+      html += `<tr>
+        <td><strong>${m.month}</strong></td>
+        <td class="num inc-val">${money(m.income)}</td>
+        <td class="num exp-val">${money(m.expense)}</td>
+        <td class="num ${netClass}">${money(m.net)}</td>
+        <td class="num">${m.count}건</td>
+        <td class="num ${cumulClass}">${money(m.cumulative_net)}</td>
+        <td>${hasCats ? `<span class="toggle-btn" onclick="toggleCats(${idx})">상세</span>` : ''}</td>
+      </tr>`;
+      
+      // 카테고리 상세 (숨김)
+      if (hasCats) {
+        html += `<tr class="cat-detail" id="cat-detail-${idx}"><td colspan="7">
+          <table style="width:100%;font-size:.8rem;"><thead><tr>
+            <th>계정과목</th><th style="text-align:right">건수</th>
+            <th style="text-align:right">수입</th><th style="text-align:right">지출</th>
+          </tr></thead><tbody>`;
+        for (const [cat, info] of Object.entries(cats).sort((a,b) => (b[1].income + b[1].expense) - (a[1].income + a[1].expense))) {
+          html += `<tr>
+            <td><span class="cat-badge" style="font-size:.7rem;">${escapeHtml(cat)}</span></td>
+            <td class="num">${info.count}</td>
+            <td class="num inc-val">${info.income ? money(info.income) : '-'}</td>
+            <td class="num exp-val">${info.expense ? money(info.expense) : '-'}</td>
+          </tr>`;
+        }
+        html += '</tbody></table></td></tr>';
+      }
+    });
+    
+    // 합계 행
+    html += `<tr class="total-row">
+      <td><strong>합계</strong></td>
+      <td class="num inc-val"><strong>${money(total.income)}</strong></td>
+      <td class="num exp-val"><strong>${money(total.expense)}</strong></td>
+      <td class="num ${total.net >= 0 ? 'net-val' : 'exp-val'}"><strong>${money(total.net)}</strong></td>
+      <td class="num"><strong>${total.transaction_count}건</strong></td>
+      <td class="num"></td>
+      <td></td>
+    </tr>`;
+    
+    tbody.innerHTML = html;
+    
+  } catch(err) {
+    document.getElementById('loading').innerHTML = `<span style="color:#ef4444;">오류: ${err.message || '데이터 로드 실패'}</span>`;
+  }
+}
+
+function toggleCats(idx) {
+  const row = document.getElementById(`cat-detail-${idx}`);
+  if (row) row.classList.toggle('open');
+}
+
+document.addEventListener('DOMContentLoaded', loadReport);
+</script>
+{% endblock %}

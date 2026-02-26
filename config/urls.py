@@ -23,6 +23,7 @@ from .views import api_root
 from .frontend_views import (
     login_view, dashboard_view, documents_view, document_detail_view,
     merge_view, mapping_templates_view, guide_view,
+    vat_report_view, monthly_report_view, vendors_view, tax_calendar_view,
 )
 
 urlpatterns = [
@@ -31,8 +32,12 @@ urlpatterns = [
     path('app/', dashboard_view, name='dashboard'),
     path('app/documents/', documents_view, name='documents'),
     path('app/documents/<int:doc_id>/', document_detail_view, name='document-detail'),
+    path('app/documents/<int:doc_id>/vat/', vat_report_view, name='vat-report'),
+    path('app/documents/<int:doc_id>/monthly/', monthly_report_view, name='monthly-report'),
     path('app/merge/', merge_view, name='merge'),
     path('app/templates/', mapping_templates_view, name='mapping-templates'),
+    path('app/vendors/', vendors_view, name='vendors'),
+    path('app/tax-calendar/', tax_calendar_view, name='tax-calendar'),
     path('guide/', guide_view, name='guide'),
 
     # API

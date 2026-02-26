@@ -231,3 +231,74 @@ class ColumnMappingTemplate(models.Model):
     def __str__(self):
         return self.name
 
+
+class Vendor(models.Model):
+    """거래처 모델
+    
+    거래 내역에서 자동 추출되거나 수동 등록된 거래처 정보
+    """
+    VENDOR_TYPE_CHOICES = [
+        ('customer', '매출처 (고객)'),
+        ('supplier', '매입처 (거래처)'),
+        ('both', '매출/매입 겸용'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                            related_name='vendors', verbose_name='사용자')
+    name = models.CharField('거래처명', max_length=255)
+    business_number = models.CharField('사업자번호', max_length=20, blank=True,
+        help_text='000-00-00000 형식')
+    vendor_type = models.CharField('거래처 유형', max_length=10, 
+                                  choices=VENDOR_TYPE_CHOICES, default='supplier')
+    category = models.CharField('계정과목', max_length=50, blank=True,
+        help_text='주 거래 계정과목')
+    
+    # 거래 통계 (자동 갱신)
+    total_income = models.FloatField('총 입금액', default=0)
+    total_expense = models.FloatField('총 출금액', default=0)
+    transaction_count = models.IntegerField('거래 건수', default=0)
+    
+    # 연락처
+    contact_name = models.CharField('담당자명', max_length=100, blank=True)
+    phone = models.CharField('전화번호', max_length=20, blank=True)
+    email = models.EmailField('이메일', blank=True)
+    address = models.TextField('주소', blank=True)
+    
+    memo = models.TextField('메모', blank=True)
+    
+    created_at = models.DateTimeField('생성일', auto_now_add=True)
+    updated_at = models.DateTimeField('수정일', auto_now=True)
+    
+    class Meta:
+        verbose_name = '거래처'
+        verbose_name_plural = '거래처 목록'
+        ordering = ['-transaction_count']
+        unique_together = ['user', 'name']
+    
+    def __str__(self):
+        return f"{self.name} ({self.get_vendor_type_display()})"
+
+
+class TaxEvent(models.Model):
+    """세금 일정 (사용자 커스텀)"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                            related_name='tax_events', verbose_name='사용자')
+    title = models.CharField('일정명', max_length=255)
+    description = models.TextField('설명', blank=True)
+    due_date = models.DateField('마감일')
+    is_completed = models.BooleanField('완료 여부', default=False)
+    completed_at = models.DateTimeField('완료일', null=True, blank=True)
+    amount = models.FloatField('납부 금액', default=0, blank=True)
+    memo = models.TextField('메모', blank=True)
+    
+    created_at = models.DateTimeField('생성일', auto_now_add=True)
+    updated_at = models.DateTimeField('수정일', auto_now=True)
+    
+    class Meta:
+        verbose_name = '세금 일정'
+        verbose_name_plural = '세금 일정 목록'
+        ordering = ['due_date']
+    
+    def __str__(self):
+        return f"{self.title} ({self.due_date})"
+

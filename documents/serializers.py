@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (
     Document, ExtractedData, Report,
-    MergeProject, MergeFile, ColumnMappingTemplate
+    MergeProject, MergeFile, ColumnMappingTemplate,
+    Vendor, TaxEvent,
 )
 
 
@@ -232,3 +233,35 @@ class ColumnMappingTemplateSerializer(serializers.ModelSerializer):
             user=request.user,
             **validated_data
         )
+
+
+class VendorSerializer(serializers.ModelSerializer):
+    """거래처 시리얼라이저"""
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    vendor_type_display = serializers.CharField(source='get_vendor_type_display', read_only=True)
+    
+    class Meta:
+        model = Vendor
+        fields = (
+            'id', 'user', 'user_username', 'name', 'business_number',
+            'vendor_type', 'vendor_type_display', 'category',
+            'total_income', 'total_expense', 'transaction_count',
+            'contact_name', 'phone', 'email', 'address', 'memo',
+            'created_at', 'updated_at',
+        )
+        read_only_fields = ('id', 'user', 'total_income', 'total_expense',
+                           'transaction_count', 'created_at', 'updated_at')
+
+
+class TaxEventSerializer(serializers.ModelSerializer):
+    """세금 일정 시리얼라이저"""
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    
+    class Meta:
+        model = TaxEvent
+        fields = (
+            'id', 'user', 'user_username', 'title', 'description',
+            'due_date', 'is_completed', 'completed_at', 'amount', 'memo',
+            'created_at', 'updated_at',
+        )
+        read_only_fields = ('id', 'user', 'created_at', 'updated_at')

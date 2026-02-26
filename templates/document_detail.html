@@ -1,10 +1,13 @@
 {% extends "base.html" %}
-{% block title %}거래내역 - DocMerge{% endblock %}
+{% block title %}거래내역 - 기장{% endblock %}
 {% block nav_documents %}active{% endblock %}
 {% block page_title %}거래내역 상세{% endblock %}
 
 {% block top_actions %}
 <button class="btn btn-ghost" onclick="location.href='/app/documents/'">← 문서 목록</button>
+<button class="btn btn-ghost" onclick="location.href='/app/documents/{{ doc_id }}/vat/'">🧾 부가세</button>
+<button class="btn btn-ghost" onclick="location.href='/app/documents/{{ doc_id }}/monthly/'">📈 월별 리포트</button>
+<button class="btn btn-ghost" id="btn-extract-vendors">🏢 거래처 추출</button>
 <button class="btn btn-primary" id="btn-download">📥 기장 엑셀 다운로드</button>
 {% endblock %}
 
@@ -70,6 +73,12 @@
 .bar-income { background: #10b981; }
 .bar-expense { background: #ef4444; }
 .bar-val { font-size: .75rem; color: var(--c-gray-500); }
+
+/* 계정과목 수정 */
+.cell-category { cursor: pointer; transition: all .15s; }
+.cell-category:hover { filter: brightness(.9); transform: scale(1.05); }
+.cell-category.user-classified { background: #c7d2fe; color: #312e81; border: 1px solid #818cf8; }
+.cat-select { font-size: .75rem; padding: .15rem .3rem; border: 1px solid var(--c-primary); border-radius: 4px; background: #fff; max-width: 120px; }
 
 @media (max-width: 768px) {
   .fin-summary { grid-template-columns: 1fr 1fr; }
@@ -228,6 +237,10 @@ async function loadData() {
         const cells = r.cells || [];
         const cat = r.category || '미분류';
         const catClass = cat === '미분류' ? 'cell-category unclassified' : 'cell-category';
+        const globalIdx = (currentPage - 1) * pageSize + ri;
+        const isUserClassified = userClassifications[String(globalIdx)] ? ' user-classified' : '';
+        const displayCat = userClassifications[String(globalIdx)] || cat;
+        const displayCatClass = displayCat === '미분류' ? 'cell-category unclassified' : 'cell-category';
         return `<tr>${cells.map((c, ci) => {
           const isNum = numericCols.has(ci);
           const cls = isNum ? ' class="cell-number"' : '';
@@ -239,7 +252,7 @@ async function loadData() {
             } catch(e) {}
           }
           return `<td${cls}>${escapeHtml(String(val ?? ''))}</td>`;
-        }).join('')}<td><span class="${catClass}">${escapeHtml(cat)}</span></td></tr>`;
+        }).join('')}<td><span class="${displayCatClass}${isUserClassified}" onclick="editCategory(${globalIdx}, this)" title="클릭하여 분류 수정">${escapeHtml(displayCat)}</span></td></tr>`;
       }).join('');
     }
 
@@ -401,6 +414,81 @@ async function loadDocInfo() {
 document.addEventListener('DOMContentLoaded', () => {
   loadDocInfo();
   loadData();
+});
+
+// ========================
+// 계정과목 인라인 수정
+// ========================
+
+const CATEGORIES = [
+  '매출', '이자수익', '잡수입', '급여', '복리후생비', '소모품비', '접대비',
+  '여비교통비', '통신비', '수도광열비', '임차료', '보험료', '세금과공과',
+  '광고선전비', '수수료', '이자비용', '감가상각비', '외주비', '수선비', '미분류'
+];
+
+function editCategory(rowIndex, spanEl) {
+  // 이미 셀렉트가 열려있으면 무시
+  if (spanEl.querySelector('select')) return;
+  
+  const currentCat = userClassifications[String(rowIndex)] || spanEl.textContent.trim();
+  const td = spanEl.parentElement;
+  
+  const select = document.createElement('select');
+  select.className = 'cat-select';
+  
+  CATEGORIES.forEach(cat => {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    if (cat === currentCat) opt.selected = true;
+    select.appendChild(opt);
+  });
+  
+  spanEl.style.display = 'none';
+  td.appendChild(select);
+  select.focus();
+  
+  async function saveAndClose() {
+    const newCat = select.value;
+    select.remove();
+    spanEl.style.display = '';
+    
+    if (newCat !== currentCat) {
+      userClassifications[String(rowIndex)] = newCat;
+      spanEl.textContent = newCat;
+      spanEl.className = newCat === '미분류' 
+        ? 'cell-category unclassified user-classified' 
+        : 'cell-category user-classified';
+      
+      // 서버에 저장
+      try {
+        await API.post(`/api/documents/documents/${DOC_ID}/classify/`, {
+          classifications: { [String(rowIndex)]: newCat }
+        });
+        showToast(`행 ${rowIndex + 1}: ${newCat}으로 분류 저장`);
+      } catch(err) {
+        showToast('분류 저장 실패: ' + (err.message || ''), 'error');
+      }
+    }
+  }
+  
+  select.addEventListener('change', saveAndClose);
+  select.addEventListener('blur', saveAndClose);
+}
+
+// ========================
+// 거래처 자동 추출
+// ========================
+
+document.getElementById('btn-extract-vendors').addEventListener('click', async () => {
+  if (!confirm('거래 내역에서 거래처를 자동 추출합니다. 기존 거래처 정보는 업데이트됩니다.')) return;
+  
+  try {
+    const result = await API.post(`/api/documents/documents/${DOC_ID}/extract_vendors/`);
+    showToast(`${result.message} (총 ${result.total_vendors}개)`);
+  } catch(err) {
+    showToast('거래처 추출 실패: ' + (err.message || ''), 'error');
+  }
 });
 </script>
 {% endblock %}
