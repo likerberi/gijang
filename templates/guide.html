@@ -1,0 +1,413 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>사용 가이드 - DocMerge</title>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { background: var(--c-gray-50); }
+    .guide-wrap { max-width: 860px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .guide-header { text-align: center; margin-bottom: 3rem; }
+    .guide-header h1 { font-size: 2rem; margin-bottom: .5rem; }
+    .guide-header p { color: var(--c-gray-500); font-size: 1rem; }
+    .guide-nav { display: flex; justify-content: center; gap: .5rem; margin-bottom: 2rem; flex-wrap: wrap; }
+    .guide-nav a { padding: .4rem .9rem; border-radius: 9999px; background: var(--c-gray-100); color: var(--c-gray-700); font-size: .85rem; text-decoration: none; transition: all .2s; }
+    .guide-nav a:hover, .guide-nav a.active { background: var(--c-primary); color: #fff; }
+    .guide-section { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 2rem; margin-bottom: 1.5rem; }
+    .guide-section h2 { font-size: 1.25rem; font-weight: 700; margin-bottom: 1rem; padding-bottom: .5rem; border-bottom: 2px solid var(--c-primary-light); }
+    .guide-section h3 { font-size: 1rem; font-weight: 600; margin: 1.25rem 0 .5rem; }
+    .step-list { list-style: none; counter-reset: step; }
+    .step-list li { position: relative; padding-left: 3rem; margin-bottom: 1.25rem; min-height: 2rem; }
+    .step-list li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 0; width: 2rem; height: 2rem; background: var(--c-primary); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; }
+    .step-title { font-weight: 600; display: block; margin-bottom: .25rem; }
+    .step-desc { color: var(--c-gray-600); font-size: .9rem; line-height: 1.7; }
+    .tip-box { background: #eef2ff; border-left: 4px solid var(--c-primary); padding: .75rem 1rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin: 1rem 0; font-size: .85rem; }
+    .tip-box strong { color: var(--c-primary); }
+    .warn-box { background: #fef9c3; border-left: 4px solid var(--c-warning); padding: .75rem 1rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin: 1rem 0; font-size: .85rem; }
+    .warn-box strong { color: #854d0e; }
+    .screenshot { background: var(--c-gray-100); border: 1px solid var(--c-gray-200); border-radius: var(--radius); padding: 1.5rem; margin: 1rem 0; text-align: center; }
+    .screenshot .mock { display: inline-block; text-align: left; font-family: monospace; font-size: .8rem; color: var(--c-gray-600); line-height: 1.8; }
+    .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+    .feature-item { background: var(--c-gray-50); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--c-gray-200); }
+    .feature-item .icon { font-size: 1.5rem; margin-bottom: .5rem; }
+    .feature-item h4 { font-size: .9rem; margin-bottom: .25rem; }
+    .feature-item p { font-size: .8rem; color: var(--c-gray-500); }
+    .url-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    .url-table th, .url-table td { padding: .5rem .75rem; border: 1px solid var(--c-gray-200); font-size: .85rem; }
+    .url-table th { background: var(--c-gray-50); font-weight: 600; text-align: left; }
+    .url-table code { background: var(--c-gray-100); padding: 2px 6px; border-radius: 3px; font-size: .8rem; }
+    .back-link { display: inline-block; margin-bottom: 1rem; font-size: .9rem; }
+    @media (max-width: 640px) {
+      .feature-grid { grid-template-columns: 1fr; }
+      .guide-wrap { padding: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="guide-wrap">
+    <a href="/app/" class="back-link">← 대시보드로 돌아가기</a>
+
+    <div class="guide-header">
+      <h1>📄 DocMerge 사용 가이드</h1>
+      <p>문서 처리 자동화 플랫폼 — 파일 업로드부터 병합까지 한눈에</p>
+    </div>
+
+    <nav class="guide-nav">
+      <a href="#overview">개요</a>
+      <a href="#quickstart">빠른 시작</a>
+      <a href="#register">회원가입/로그인</a>
+      <a href="#documents">문서 관리</a>
+      <a href="#merge">파일 병합</a>
+      <a href="#templates">매핑 템플릿</a>
+      <a href="#urls">URL 목록</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+
+    <!-- 개요 -->
+    <section class="guide-section" id="overview">
+      <h2>📋 시스템 개요</h2>
+      <p>DocMerge는 엑셀, PDF, 이미지 파일을 업로드하여 핵심 정보를 추출하고, <strong>서로 다른 구조의 엑셀 파일들을 하나로 병합</strong>하는 내부 업무용 API 서비스입니다.</p>
+
+      <div class="feature-grid">
+        <div class="feature-item">
+          <div class="icon">📁</div>
+          <h4>문서 업로드 & 처리</h4>
+          <p>Excel, PDF, 이미지 파일을 업로드하면 백그라운드에서 자동으로 데이터를 추출합니다.</p>
+        </div>
+        <div class="feature-item">
+          <div class="icon">🔗</div>
+          <h4>다중 엑셀 병합</h4>
+          <p>열 이름이 다른 여러 엑셀 파일을 자동 매핑하여 하나의 통합 파일로 만듭니다.</p>
+        </div>
+        <div class="feature-item">
+          <div class="icon">🤖</div>
+          <h4>자동 분석</h4>
+          <p>헤더 행 자동 탐지, 열 이름 매핑 추천, 날짜/숫자 형식 자동 정규화를 제공합니다.</p>
+        </div>
+        <div class="feature-item">
+          <div class="icon">📋</div>
+          <h4>매핑 템플릿</h4>
+          <p>자주 사용하는 열 매핑 규칙을 저장해두고 다음에 바로 적용할 수 있습니다.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 빠른 시작 -->
+    <section class="guide-section" id="quickstart">
+      <h2>⚡ 5분 빠른 시작</h2>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">회원가입</span>
+          <span class="step-desc">
+            <a href="/accounts/login/">로그인 페이지</a>에서 "회원가입" 링크를 클릭합니다.<br>
+            아이디, 이메일, 비밀번호(8자 이상)를 입력하고 가입합니다.
+          </span>
+        </li>
+        <li>
+          <span class="step-title">로그인</span>
+          <span class="step-desc">
+            가입 시 자동 로그인됩니다. 다음부터는 아이디/비밀번호로 로그인하세요.
+          </span>
+        </li>
+        <li>
+          <span class="step-title">파일 병합 프로젝트 만들기</span>
+          <span class="step-desc">
+            좌측 메뉴에서 <strong>"🔗 파일 병합"</strong>을 클릭 → <strong>"+ 새 프로젝트"</strong> 버튼 → 프로젝트 이름 입력 후 생성
+          </span>
+        </li>
+        <li>
+          <span class="step-title">엑셀 파일 업로드</span>
+          <span class="step-desc">
+            프로젝트 상세에서 <strong>"+ 파일 추가"</strong> 버튼으로 .xlsx .xls 파일을 업로드합니다. 여러 파일을 한번에 선택할 수 있습니다.
+          </span>
+        </li>
+        <li>
+          <span class="step-title">분석 → 매핑 설정 → 병합</span>
+          <span class="step-desc">
+            <strong>"🔍 파일 분석 시작"</strong> → 자동 분석 결과를 확인하고 열 이름 매핑을 조정 →
+            <strong>"🚀 병합 실행"</strong> → 완료 후 <strong>"📥 다운로드"</strong>
+          </span>
+        </li>
+      </ol>
+    </section>
+
+    <!-- 회원가입/로그인 -->
+    <section class="guide-section" id="register">
+      <h2>👤 회원가입 & 로그인</h2>
+
+      <h3>회원가입</h3>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">로그인 페이지 접속</span>
+          <span class="step-desc">브라우저에서 <a href="/accounts/login/">http://localhost:8000/accounts/login/</a> 접속</span>
+        </li>
+        <li>
+          <span class="step-title">"회원가입" 클릭</span>
+          <span class="step-desc">하단의 "계정이 없으신가요? 회원가입" 링크를 클릭합니다.</span>
+        </li>
+        <li>
+          <span class="step-title">정보 입력</span>
+          <span class="step-desc">
+            <strong>아이디</strong>: 3자 이상 영문/숫자<br>
+            <strong>이메일</strong>: 유효한 이메일 주소<br>
+            <strong>비밀번호</strong>: 8자 이상 (확인란에 동일하게 입력)
+          </span>
+        </li>
+        <li>
+          <span class="step-title">"가입하기" 클릭</span>
+          <span class="step-desc">가입 완료 후 자동으로 대시보드로 이동합니다.</span>
+        </li>
+      </ol>
+
+      <div class="tip-box">
+        <strong>💡 TIP:</strong> 가입 후 자동 로그인되므로 별도 로그인 조작이 필요 없습니다. 로그인 토큰은 1시간 유효하며, 자동 갱신됩니다.
+      </div>
+
+      <h3>로그아웃</h3>
+      <p>좌측 사이드바 하단의 <strong>"로그아웃"</strong> 버튼을 클릭하면 토큰이 삭제되고 로그인 페이지로 이동합니다.</p>
+    </section>
+
+    <!-- 문서 관리 -->
+    <section class="guide-section" id="documents">
+      <h2>📁 문서 관리</h2>
+      <p>좌측 메뉴에서 <strong>"📁 문서 관리"</strong>를 클릭하면 업로드한 문서 목록을 볼 수 있습니다.</p>
+
+      <h3>파일 업로드</h3>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">업로드 버튼 클릭</span>
+          <span class="step-desc">상단의 <strong>"📤 업로드"</strong> 버튼을 클릭합니다.</span>
+        </li>
+        <li>
+          <span class="step-title">파일 선택</span>
+          <span class="step-desc">
+            모달 창에서 파일 유형을 선택합니다:<br>
+            • <strong>Excel</strong>: .xlsx, .xls 파일<br>
+            • <strong>PDF</strong>: .pdf 파일<br>
+            • <strong>이미지</strong>: .jpg, .png, .gif 파일
+          </span>
+        </li>
+        <li>
+          <span class="step-title">업로드 완료</span>
+          <span class="step-desc">업로드 후 백그라운드에서 자동으로 데이터 추출이 시작됩니다. 상태가 "처리중" → "완료"로 바뀔 때까지 기다리세요.</span>
+        </li>
+      </ol>
+
+      <h3>추출 데이터 확인</h3>
+      <p>문서 목록에서 <strong>"보기"</strong> 버튼을 클릭하면 추출된 데이터를 확인할 수 있습니다.</p>
+
+      <h3>필터 & 검색</h3>
+      <p>상단 필터 바에서 <strong>파일 유형</strong>(Excel/PDF/이미지), <strong>상태</strong>(처리중/완료/실패), <strong>키워드</strong> 검색이 가능합니다.</p>
+
+      <div class="warn-box">
+        <strong>⚠️ 주의:</strong> 문서 처리는 Celery 백그라운드 태스크를 사용합니다. Redis와 Celery worker가 실행 중이어야 합니다.
+      </div>
+    </section>
+
+    <!-- 파일 병합 (핵심) -->
+    <section class="guide-section" id="merge">
+      <h2>🔗 파일 병합 (핵심 기능)</h2>
+      <p>서로 다른 양식의 엑셀 파일들을 <strong>열 이름 자동 매핑</strong>하여 하나의 통합 파일로 만드는 핵심 기능입니다.</p>
+
+      <h3>전체 워크플로우 (5단계)</h3>
+      <div class="screenshot">
+        <div class="mock">
+          ① 파일 업로드 ──→ ② 분석 ──→ ③ 매핑 설정 ──→ ④ 병합 실행 ──→ ⑤ 다운로드
+        </div>
+      </div>
+
+      <h3>STEP 1: 프로젝트 생성 & 파일 업로드</h3>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">좌측 메뉴에서 "🔗 파일 병합" 클릭</span>
+          <span class="step-desc">프로젝트 목록 페이지가 나타납니다.</span>
+        </li>
+        <li>
+          <span class="step-title">"+ 새 프로젝트" 클릭</span>
+          <span class="step-desc">프로젝트 이름(예: "2026년 1월 매출현황 통합")과 설명을 입력하고 생성합니다.</span>
+        </li>
+        <li>
+          <span class="step-title">파일 업로드</span>
+          <span class="step-desc">
+            <strong>"+ 파일 추가"</strong> 버튼을 클릭하여 .xlsx 또는 .xls 파일을 선택합니다.<br>
+            여러 파일을 한번에 선택할 수 있습니다 (Ctrl/Cmd 클릭 또는 드래그).
+          </span>
+        </li>
+      </ol>
+
+      <div class="tip-box">
+        <strong>💡 예시 상황:</strong> A지사의 "매출보고서_서울.xlsx" (열: 날짜, 매출금액, 거래처명)와 B지사의 "영업실적_부산.xlsx" (열: 일자, 매출액, 고객명)를 하나로 합치고 싶을 때 이 기능을 사용합니다.
+      </div>
+
+      <h3>STEP 2: 파일 분석</h3>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">"🔍 파일 분석 시작" 클릭</span>
+          <span class="step-desc">
+            시스템이 각 파일의 <strong>헤더 행</strong>을 자동 탐지하고, 열 이름들 사이의 <strong>유사도</strong>를 분석합니다.<br>
+            분석이 완료되면 자동으로 결과가 표시됩니다 (보통 몇 초 내).
+          </span>
+        </li>
+      </ol>
+
+      <h3>STEP 3: 열 매핑 설정</h3>
+      <p>분석이 완료되면 <strong>"⚙️ 열 매핑 설정"</strong> 테이블이 나타납니다.</p>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">자동 추천 확인</span>
+          <span class="step-desc">
+            시스템이 비슷한 열 이름을 자동으로 매핑한 결과가 표시됩니다.<br>
+            예: "거래처명" → customer, "매출금액" → sales (신뢰도 85%)
+          </span>
+        </li>
+        <li>
+          <span class="step-title">매핑 수정</span>
+          <span class="step-desc">
+            자동 매핑이 맞지 않으면 <strong>"매핑 → 표준 이름"</strong> 칸의 값을 직접 수정합니다.<br>
+            같은 의미의 열끼리 동일한 표준 이름을 부여하세요.<br>
+            예: "날짜"와 "일자" 모두 → "date"
+          </span>
+        </li>
+        <li>
+          <span class="step-title">날짜/숫자 열 지정</span>
+          <span class="step-desc">
+            <strong>날짜 체크박스 ☑</strong>: 체크하면 "2025.1.1", "1월 1일", "Jan 1" 등 다양한 형식을 YYYY-MM-DD로 통일<br>
+            <strong>숫자 체크박스 ☑</strong>: 체크하면 "1,000,000원", "100천원", "(500)" 등을 숫자로 통일
+          </span>
+        </li>
+        <li>
+          <span class="step-title">"💾 매핑 저장" 클릭</span>
+          <span class="step-desc">설정한 매핑 규칙이 저장됩니다.</span>
+        </li>
+      </ol>
+
+      <div class="tip-box">
+        <strong>💡 템플릿 활용:</strong> 이전에 저장한 매핑 템플릿을 <strong>"📋 템플릿 적용"</strong> 버튼으로 바로 적용할 수 있습니다. 반복 업무에 유용합니다.
+      </div>
+
+      <h3>STEP 4: 병합 실행</h3>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">"🚀 병합 실행" 클릭</span>
+          <span class="step-desc">
+            시스템이 모든 파일의 데이터를 설정한 매핑에 따라 하나로 합칩니다.<br>
+            날짜/숫자 열은 자동 정규화됩니다. 완료까지 파일 크기에 따라 수초~수분 소요됩니다.
+          </span>
+        </li>
+      </ol>
+
+      <h3>STEP 5: 결과 다운로드</h3>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">"📥 병합 파일 다운로드" 클릭</span>
+          <span class="step-desc">
+            통합된 Excel 파일이 다운로드됩니다. (<strong>헤더 스타일링, 자동 필터, 고정 행</strong> 포함)<br>
+            병합 로그에서 각 파일별 처리 결과(성공/실패, 처리된 행 수)를 확인할 수 있습니다.
+          </span>
+        </li>
+        <li>
+          <span class="step-title">"📋 템플릿으로 저장" (선택)</span>
+          <span class="step-desc">이번에 사용한 매핑 규칙을 다음에 재사용하려면 템플릿으로 저장해두세요.</span>
+        </li>
+      </ol>
+    </section>
+
+    <!-- 매핑 템플릿 -->
+    <section class="guide-section" id="templates">
+      <h2>📋 매핑 템플릿</h2>
+      <p>좌측 메뉴의 <strong>"📋 매핑 템플릿"</strong>에서 관리합니다.</p>
+
+      <h3>템플릿 생성 방법 2가지</h3>
+      <ol class="step-list">
+        <li>
+          <span class="step-title">병합 완료 후 저장</span>
+          <span class="step-desc">파일 병합이 완료된 후 <strong>"📋 템플릿으로 저장"</strong> 버튼을 클릭하면 해당 프로젝트의 매핑 규칙이 자동으로 저장됩니다.</span>
+        </li>
+        <li>
+          <span class="step-title">수동 생성</span>
+          <span class="step-desc">
+            매핑 템플릿 페이지에서 <strong>"+ 새 템플릿"</strong> 클릭 →<br>
+            이름, 설명, 열 매핑(JSON 형식), 날짜/숫자 열을 입력하여 생성합니다.
+          </span>
+        </li>
+      </ol>
+
+      <h3>템플릿 적용</h3>
+      <p>파일 병합 프로젝트의 매핑 설정 단계에서 <strong>"📋 템플릿 적용"</strong> 버튼을 클릭하면 저장된 템플릿 목록이 나타납니다. 원하는 템플릿을 클릭하면 매핑이 자동으로 채워집니다.</p>
+    </section>
+
+    <!-- URL 목록 -->
+    <section class="guide-section" id="urls">
+      <h2>🔗 URL 목록</h2>
+
+      <h3>프론트엔드 페이지</h3>
+      <table class="url-table">
+        <thead><tr><th>페이지</th><th>URL</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr><td>로그인</td><td><code>/accounts/login/</code></td><td>회원가입 및 로그인</td></tr>
+          <tr><td>대시보드</td><td><code>/app/</code></td><td>전체 요약, 통계, 빠른 작업</td></tr>
+          <tr><td>문서 관리</td><td><code>/app/documents/</code></td><td>파일 업로드, 추출 데이터 확인</td></tr>
+          <tr><td>파일 병합</td><td><code>/app/merge/</code></td><td>병합 프로젝트 생성 및 실행</td></tr>
+          <tr><td>매핑 템플릿</td><td><code>/app/templates/</code></td><td>열 매핑 규칙 재사용</td></tr>
+          <tr><td>사용 가이드</td><td><code>/guide/</code></td><td>지금 보고 있는 이 페이지</td></tr>
+        </tbody>
+      </table>
+
+      <h3>API 엔드포인트</h3>
+      <table class="url-table">
+        <thead><tr><th>기능</th><th>URL</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr><td>API 문서</td><td><code>/api/docs/</code></td><td>Swagger UI (API 테스트 가능)</td></tr>
+          <tr><td>회원가입</td><td><code>POST /api/users/register/</code></td><td>아이디, 이메일, 비밀번호</td></tr>
+          <tr><td>로그인</td><td><code>POST /api/users/login/</code></td><td>JWT 토큰 발급</td></tr>
+          <tr><td>문서 CRUD</td><td><code>/api/documents/documents/</code></td><td>문서 업로드, 목록, 삭제</td></tr>
+          <tr><td>병합 프로젝트</td><td><code>/api/documents/merge-projects/</code></td><td>프로젝트 생성, 분석, 병합</td></tr>
+          <tr><td>매핑 템플릿</td><td><code>/api/documents/mapping-templates/</code></td><td>템플릿 CRUD</td></tr>
+          <tr><td>관리자</td><td><code>/admin/</code></td><td>Django 관리자 페이지</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- FAQ -->
+    <section class="guide-section" id="faq">
+      <h2>❓ 자주 묻는 질문</h2>
+
+      <h3>"처리중" 상태에서 바뀌지 않아요</h3>
+      <p>Celery worker와 Redis가 실행 중인지 확인하세요. 터미널에서:</p>
+      <div class="screenshot"><div class="mock">
+redis-server                              # Redis 실행<br>
+celery -A config worker --loglevel=info   # Celery 실행<br>
+# 또는 한번에: ./start_dev.sh
+      </div></div>
+
+      <h3>로그인 토큰이 만료됐다고 나와요</h3>
+      <p>Access 토큰은 1시간 유효합니다. 자동 갱신이 동작하지만, 7일 이상 미접속 시 재로그인이 필요합니다.</p>
+
+      <h3>병합 결과에 빈 열이 있어요</h3>
+      <p>매핑 설정에서 해당 열의 표준 이름이 파일마다 다르게 입력되었을 수 있습니다. 같은 데이터의 열은 반드시 동일한 표준 이름으로 매핑하세요.</p>
+
+      <h3>날짜 형식이 통일되지 않아요</h3>
+      <p>매핑 설정에서 해당 열의 <strong>"날짜" 체크박스</strong>를 반드시 체크하세요. 지원 형식: 2025-01-01, 2025.1.1, 1월 1일, Jan 1 2025 등.</p>
+
+      <h3>어떤 엑셀 형식을 지원하나요?</h3>
+      <p><strong>.xlsx</strong>(권장)와 <strong>.xls</strong> 파일을 지원합니다. CSV는 현재 미지원입니다.</p>
+
+      <h3>서버 시작은 어떻게 하나요?</h3>
+      <div class="screenshot"><div class="mock">
+cd /Users/seungyongchoi/abroad/gijang<br>
+source venv/bin/activate<br>
+./start_dev.sh            # Django + Celery + Redis 일괄 실행<br>
+# 또는 개별 실행:<br>
+python manage.py runserver # Django만<br>
+      </div></div>
+    </section>
+
+    <div style="text-align: center; padding: 2rem 0; color: var(--c-gray-400); font-size: .8rem;">
+      DocMerge v1.0 · 문서 처리 자동화 플랫폼
+    </div>
+  </div>
+</body>
+</html>

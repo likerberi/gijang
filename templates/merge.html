@@ -1,0 +1,599 @@
+{% extends "base.html" %}
+{% block title %}파일 병합 - DocMerge{% endblock %}
+{% block nav_merge %}active{% endblock %}
+{% block page_title %}파일 병합{% endblock %}
+
+{% block top_actions %}
+<button class="btn btn-primary" id="btn-new-project">+ 새 프로젝트</button>
+{% endblock %}
+
+{% block content %}
+<!-- 프로젝트 목록 -->
+<div id="project-list-section">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>프로젝트명</th>
+          <th>상태</th>
+          <th>파일 수</th>
+          <th>생성일</th>
+          <th>작업</th>
+        </tr>
+      </thead>
+      <tbody id="projects-body">
+        <tr><td colspan="5" class="empty-state">로딩 중...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 프로젝트 상세 (숨김 기본) -->
+<div id="project-detail-section" style="display:none;">
+  <button class="btn btn-ghost mb-2" id="btn-back-list">← 목록으로</button>
+  <div class="card" id="project-info-card">
+    <!-- 동적으로 채워짐 -->
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ========================
+// 프로젝트 목록
+// ========================
+async function loadProjects() {
+  try {
+    const data = await API.get('/api/documents/merge-projects/');
+    const results = data.results || [];
+    const tbody = document.getElementById('projects-body');
+
+    if (results.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">프로젝트가 없습니다. "새 프로젝트"를 만들어보세요.</td></tr>';
+    } else {
+      tbody.innerHTML = results.map(p => `
+        <tr>
+          <td><a href="#" class="link" onclick="openProject(${p.id}); return false;"><strong>${escapeHtml(p.name)}</strong></a></td>
+          <td>${mergeStatusBadge(p.status)}</td>
+          <td>${p.file_count || (p.files || []).length}개</td>
+          <td>${formatDate(p.created_at)}</td>
+          <td class="actions">
+            <button class="btn btn-xs btn-ghost" onclick="openProject(${p.id})">상세</button>
+            <button class="btn btn-xs btn-danger" onclick="deleteProject(${p.id})">🗑</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+  } catch(err) {
+    showToast('프로젝트 목록을 불러올 수 없습니다', 'error');
+  }
+}
+
+// 새 프로젝트 생성
+document.getElementById('btn-new-project').addEventListener('click', () => {
+  showModal('새 병합 프로젝트', `
+    <form id="new-project-form">
+      <div class="form-group">
+        <label>프로젝트명 <span class="required">*</span></label>
+        <input type="text" id="project-name" class="form-input" placeholder="예: 2026년 1월 매출현황 통합" required>
+      </div>
+      <div class="form-group">
+        <label>설명</label>
+        <textarea id="project-desc" class="form-textarea" placeholder="프로젝트 설명 (선택)" rows="2"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">생성</button>
+    </form>
+  `);
+
+  document.getElementById('new-project-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const res = await API.post('/api/documents/merge-projects/', {
+        name: document.getElementById('project-name').value,
+        description: document.getElementById('project-desc').value,
+      });
+      closeModal();
+      showToast('프로젝트가 생성되었습니다');
+      openProject(res.id);
+      loadProjects();
+    } catch(err) {
+      showToast(err.message || '생성 실패', 'error');
+    }
+  });
+});
+
+async function deleteProject(id) {
+  if (!confirm('프로젝트와 모든 파일이 삭제됩니다. 계속하시겠습니까?')) return;
+  try {
+    await API.delete(`/api/documents/merge-projects/${id}/`);
+    showToast('삭제되었습니다');
+    loadProjects();
+  } catch(err) {
+    showToast('삭제 실패', 'error');
+  }
+}
+
+// ========================
+// 프로젝트 상세 / 워크플로우
+// ========================
+let currentProject = null;
+
+document.getElementById('btn-back-list').addEventListener('click', () => {
+  document.getElementById('project-detail-section').style.display = 'none';
+  document.getElementById('project-list-section').style.display = 'block';
+  loadProjects();
+});
+
+async function openProject(id) {
+  try {
+    const project = await API.get(`/api/documents/merge-projects/${id}/`);
+    currentProject = project;
+    document.getElementById('project-list-section').style.display = 'none';
+    document.getElementById('project-detail-section').style.display = 'block';
+    renderProjectDetail(project);
+  } catch(err) {
+    showToast('프로젝트를 불러올 수 없습니다', 'error');
+  }
+}
+
+function renderProjectDetail(p) {
+  const card = document.getElementById('project-info-card');
+  const files = p.files || [];
+  const status = p.status;
+
+  card.innerHTML = `
+    <div class="card-header">
+      <h3>${escapeHtml(p.name)}</h3>
+      <span>${mergeStatusBadge(status)}</span>
+    </div>
+    ${p.description ? `<p class="text-muted mb-2">${escapeHtml(p.description)}</p>` : ''}
+
+    <!-- 워크플로우 스텝 인디케이터 -->
+    <div class="workflow-steps">
+      <div class="step ${getStepClass(status, 'upload')}">
+        <div class="step-num">1</div>
+        <div class="step-label">파일 업로드</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step ${getStepClass(status, 'analyze')}">
+        <div class="step-num">2</div>
+        <div class="step-label">분석</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step ${getStepClass(status, 'mapping')}">
+        <div class="step-num">3</div>
+        <div class="step-label">매핑 설정</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step ${getStepClass(status, 'merge')}">
+        <div class="step-num">4</div>
+        <div class="step-label">병합 실행</div>
+      </div>
+      <div class="step-line"></div>
+      <div class="step ${getStepClass(status, 'download')}">
+        <div class="step-num">5</div>
+        <div class="step-label">다운로드</div>
+      </div>
+    </div>
+
+    <!-- STEP 1: 파일 업로드 -->
+    <div class="section">
+      <div class="section-header">
+        <h4>📁 업로드된 파일 (${files.length}개)</h4>
+        ${['draft','ready','failed'].includes(status) ? `
+          <label class="btn btn-sm btn-primary" style="cursor:pointer;">
+            + 파일 추가
+            <input type="file" id="merge-file-input" multiple accept=".xlsx,.xls" style="display:none;">
+          </label>
+        ` : ''}
+      </div>
+      ${files.length > 0 ? `
+        <div class="file-list">
+          ${files.map(f => `
+            <div class="file-item">
+              <div class="file-info">
+                <span class="file-name">${escapeHtml(f.original_filename)}</span>
+                <span class="file-meta">${formatSize(f.file_size)} · ${f.total_rows > 0 ? f.total_rows + '행' : '미분석'}</span>
+              </div>
+              <div class="file-badges">
+                ${f.is_analyzed ? '<span class="badge badge-success">분석됨</span>' : ''}
+                ${f.is_processed ? '<span class="badge badge-success">처리됨</span>' : ''}
+                ${f.error_message ? '<span class="badge badge-danger" title="'+escapeHtml(f.error_message)+'">오류</span>' : ''}
+              </div>
+              ${['draft','ready','failed'].includes(status) ? `<button class="btn btn-xs btn-danger" onclick="removeFile(${p.id}, ${f.id})">✕</button>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      ` : '<p class="text-muted">파일을 업로드해주세요 (.xlsx, .xls)</p>'}
+    </div>
+
+    <!-- STEP 2: 분석 -->
+    ${files.length > 0 && ['draft'].includes(status) ? `
+      <div class="section">
+        <button class="btn btn-primary" id="btn-analyze">🔍 파일 분석 시작</button>
+        <span class="text-muted" style="margin-left:0.5rem;">헤더 탐지 및 열 매핑을 자동 분석합니다</span>
+      </div>
+    ` : ''}
+
+    <!-- 분석 진행 중 -->
+    ${status === 'analyzing' ? `
+      <div class="section">
+        <div class="loading-indicator">
+          <div class="spinner"></div>
+          <span>파일을 분석하고 있습니다...</span>
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- STEP 3: 매핑 설정 (분석 완료 후) -->
+    ${['ready','failed'].includes(status) && p.analysis_result && Object.keys(p.analysis_result).length > 0 ? renderMappingSection(p) : ''}
+
+    <!-- STEP 4: 병합 실행 -->
+    ${status === 'ready' ? `
+      <div class="section">
+        <button class="btn btn-primary btn-lg" id="btn-execute">🚀 병합 실행</button>
+      </div>
+    ` : ''}
+
+    ${status === 'merging' ? `
+      <div class="section">
+        <div class="loading-indicator">
+          <div class="spinner"></div>
+          <span>파일을 병합하고 있습니다...</span>
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- STEP 5: 다운로드 -->
+    ${status === 'completed' ? `
+      <div class="section">
+        <div class="success-box">
+          <h4>✅ 병합 완료!</h4>
+          <p>총 ${p.merge_log?.total_rows || '?'}행, ${p.merge_log?.files_succeeded || '?'}개 파일 처리됨</p>
+          <button class="btn btn-primary btn-lg" onclick="downloadMergedFile(${p.id}, '${escapeHtml(p.name)}')">📥 병합 파일 다운로드</button>
+          <button class="btn btn-ghost" onclick="saveAsTemplate(${p.id})">📋 템플릿으로 저장</button>
+        </div>
+      </div>
+      ${p.merge_log?.merge_log ? renderMergeLog(p.merge_log.merge_log) : ''}
+    ` : ''}
+
+    <!-- 오류 상태 -->
+    ${status === 'failed' && p.error_message ? `
+      <div class="error-box">
+        <strong>오류:</strong> ${escapeHtml(p.error_message)}
+        <button class="btn btn-sm btn-primary" style="margin-left:1rem;" id="btn-retry">재시도</button>
+      </div>
+    ` : ''}
+  `;
+
+  // 이벤트 바인딩
+  bindProjectEvents(p);
+}
+
+function getStepClass(status, step) {
+  const order = { upload: 0, analyze: 1, mapping: 2, merge: 3, download: 4 };
+  const statusStep = {
+    draft: 0, analyzing: 1, ready: 2, merging: 3, completed: 4, failed: 2
+  };
+  const current = statusStep[status] ?? 0;
+  const target = order[step];
+  if (current > target) return 'step-done';
+  if (current === target) return 'step-active';
+  return '';
+}
+
+function renderMappingSection(p) {
+  const analysis = p.analysis_result || {};
+  const allHeaders = analysis.all_headers || [];
+  const suggestions = analysis.suggested_mappings?.individual || {};
+  const currentMapping = p.column_mapping || {};
+  const dateCols = p.date_columns || [];
+  const numberCols = p.number_columns || [];
+
+  let rows = allHeaders.map(h => {
+    const sug = suggestions[h] || {};
+    const mapped = currentMapping[h] || sug.standard_name || h;
+    const conf = sug.confidence ? `(${Math.round(sug.confidence * 100)}%)` : '';
+    const isDate = dateCols.includes(mapped);
+    const isNumber = numberCols.includes(mapped);
+    return `
+      <tr>
+        <td><code>${escapeHtml(h)}</code></td>
+        <td>
+          <input type="text" class="form-input form-input-sm mapping-input"
+                 data-original="${escapeHtml(h)}" value="${escapeHtml(mapped)}">
+          ${conf ? `<small class="text-muted">${conf}</small>` : ''}
+        </td>
+        <td class="text-center">
+          <input type="checkbox" class="date-check" data-col="${escapeHtml(mapped)}" ${isDate ? 'checked' : ''}>
+        </td>
+        <td class="text-center">
+          <input type="checkbox" class="number-check" data-col="${escapeHtml(mapped)}" ${isNumber ? 'checked' : ''}>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <div class="section">
+      <div class="section-header">
+        <h4>⚙️ 열 매핑 설정</h4>
+        <button class="btn btn-sm btn-ghost" id="btn-apply-template">📋 템플릿 적용</button>
+      </div>
+      <p class="text-muted">원본 열 이름을 표준 이름으로 매핑합니다. 날짜/숫자 열을 체크하면 자동 정규화됩니다.</p>
+      <div class="table-wrap" style="max-height:400px; overflow:auto;">
+        <table class="table table-sm">
+          <thead>
+            <tr><th>원본 열 이름</th><th>매핑 → 표준 이름</th><th>날짜</th><th>숫자</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:1rem;">
+        <button class="btn btn-primary" id="btn-save-mapping">💾 매핑 저장</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderMergeLog(log) {
+  if (!log || log.length === 0) return '';
+  return `
+    <div class="section">
+      <h4>📝 병합 로그</h4>
+      <div class="table-wrap">
+        <table class="table table-sm">
+          <thead><tr><th>파일</th><th>상태</th><th>처리된 행</th><th>오류</th></tr></thead>
+          <tbody>
+            ${log.map(l => `
+              <tr>
+                <td>${escapeHtml(l.file || '')}</td>
+                <td>${l.status === 'success' ? '<span class="badge badge-success">성공</span>' : '<span class="badge badge-danger">실패</span>'}</td>
+                <td>${l.rows_processed || '-'}</td>
+                <td>${l.error ? escapeHtml(l.error) : '-'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function mergeStatusBadge(s) {
+  const map = {
+    draft: ['초안', 'badge-gray'],
+    analyzing: ['분석중', 'badge-info'],
+    ready: ['준비됨', 'badge-warning'],
+    merging: ['병합중', 'badge-info'],
+    completed: ['완료', 'badge-success'],
+    failed: ['실패', 'badge-danger'],
+  };
+  const [label, cls] = map[s] || [s, 'badge-gray'];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function bindProjectEvents(p) {
+  // 파일 업로드
+  const fileInput = document.getElementById('merge-file-input');
+  if (fileInput) {
+    fileInput.addEventListener('change', async (e) => {
+      const files = e.target.files;
+      if (files.length === 0) return;
+      const formData = new FormData();
+      for (const f of files) formData.append('files', f);
+
+      try {
+        await API.upload(`/api/documents/merge-projects/${p.id}/upload_files/`, formData);
+        showToast(`${files.length}개 파일 업로드 완료`);
+        openProject(p.id);
+      } catch(err) {
+        showToast(err.message || '업로드 실패', 'error');
+      }
+    });
+  }
+
+  // 분석 시작
+  const btnAnalyze = document.getElementById('btn-analyze');
+  if (btnAnalyze) {
+    btnAnalyze.addEventListener('click', async () => {
+      try {
+        await API.post(`/api/documents/merge-projects/${p.id}/analyze/`);
+        showToast('분석이 시작되었습니다');
+        // 폴링 시작
+        pollProjectStatus(p.id);
+      } catch(err) {
+        showToast(err.message || '분석 시작 실패', 'error');
+      }
+    });
+  }
+
+  // 매핑 저장
+  const btnSaveMapping = document.getElementById('btn-save-mapping');
+  if (btnSaveMapping) {
+    btnSaveMapping.addEventListener('click', async () => {
+      const mappingInputs = document.querySelectorAll('.mapping-input');
+      const columnMapping = {};
+      mappingInputs.forEach(inp => {
+        const original = inp.dataset.original;
+        const standard = inp.value.trim();
+        if (original && standard && original !== standard) {
+          columnMapping[original] = standard;
+        }
+      });
+
+      const dateColumns = [];
+      document.querySelectorAll('.date-check:checked').forEach(cb => dateColumns.push(cb.dataset.col));
+      const numberColumns = [];
+      document.querySelectorAll('.number-check:checked').forEach(cb => numberColumns.push(cb.dataset.col));
+
+      try {
+        await API.put(`/api/documents/merge-projects/${p.id}/update_mapping/`, {
+          column_mapping: columnMapping,
+          date_columns: dateColumns,
+          number_columns: numberColumns,
+        });
+        showToast('매핑이 저장되었습니다');
+        openProject(p.id);
+      } catch(err) {
+        showToast(err.message || '저장 실패', 'error');
+      }
+    });
+  }
+
+  // 병합 실행
+  const btnExecute = document.getElementById('btn-execute');
+  if (btnExecute) {
+    btnExecute.addEventListener('click', async () => {
+      try {
+        await API.post(`/api/documents/merge-projects/${p.id}/execute/`);
+        showToast('병합이 시작되었습니다');
+        pollProjectStatus(p.id);
+      } catch(err) {
+        showToast(err.message || '병합 시작 실패', 'error');
+      }
+    });
+  }
+
+  // 재시도
+  const btnRetry = document.getElementById('btn-retry');
+  if (btnRetry) {
+    btnRetry.addEventListener('click', async () => {
+      try {
+        await API.post(`/api/documents/merge-projects/${p.id}/execute/`);
+        showToast('재시도 시작');
+        pollProjectStatus(p.id);
+      } catch(err) {
+        showToast(err.message || '실패', 'error');
+      }
+    });
+  }
+
+  // 템플릿 적용
+  const btnTemplate = document.getElementById('btn-apply-template');
+  if (btnTemplate) {
+    btnTemplate.addEventListener('click', () => applyTemplateModal(p.id));
+  }
+}
+
+async function removeFile(projectId, fileId) {
+  if (!confirm('이 파일을 제거하시겠습니까?')) return;
+  try {
+    await API.delete(`/api/documents/merge-projects/${projectId}/files/${fileId}/`);
+    showToast('파일이 제거되었습니다');
+    openProject(projectId);
+  } catch(err) {
+    showToast('제거 실패', 'error');
+  }
+}
+
+async function downloadMergedFile(projectId, projectName) {
+  try {
+    const token = API.getToken();
+    if (!token) throw new Error('로그인이 필요합니다');
+    let resp = await fetch(`/api/documents/merge-projects/${projectId}/download/`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    // 토큰 만료 시 갱신 후 재시도
+    if (resp.status === 401) {
+      await API.refreshToken();
+      const newToken = API.getToken();
+      resp = await fetch(`/api/documents/merge-projects/${projectId}/download/`, {
+        headers: { 'Authorization': `Bearer ${newToken}` }
+      });
+    }
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || err.detail || '다운로드 실패');
+    }
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName}_병합결과.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch(err) {
+    showToast(err.message || '다운로드 실패', 'error');
+  }
+}
+
+async function saveAsTemplate(projectId) {
+  showModal('템플릿으로 저장', `
+    <form id="save-template-form">
+      <div class="form-group">
+        <label>템플릿 이름</label>
+        <input type="text" id="tpl-name" class="form-input" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">저장</button>
+    </form>
+  `);
+  document.getElementById('save-template-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await API.post(`/api/documents/merge-projects/${projectId}/save_as_template/`, {
+        name: document.getElementById('tpl-name').value,
+      });
+      closeModal();
+      showToast('템플릿이 저장되었습니다');
+    } catch(err) {
+      showToast('저장 실패', 'error');
+    }
+  });
+}
+
+async function applyTemplateModal(projectId) {
+  try {
+    const data = await API.get('/api/documents/mapping-templates/');
+    const templates = data.results || [];
+    if (templates.length === 0) {
+      showToast('저장된 템플릿이 없습니다', 'warning');
+      return;
+    }
+    showModal('템플릿 적용', `
+      <div class="template-list">
+        ${templates.map(t => `
+          <div class="template-item" onclick="applyTemplate(${projectId}, ${t.id})" style="cursor:pointer;">
+            <strong>${escapeHtml(t.name)}</strong>
+            <small class="text-muted">${escapeHtml(t.description || '')}</small>
+          </div>
+        `).join('')}
+      </div>
+    `);
+  } catch(err) {
+    showToast('템플릿을 불러올 수 없습니다', 'error');
+  }
+}
+
+async function applyTemplate(projectId, templateId) {
+  try {
+    await API.post(`/api/documents/merge-projects/${projectId}/apply_template/`, {
+      template_id: templateId,
+    });
+    closeModal();
+    showToast('템플릿이 적용되었습니다');
+    openProject(projectId);
+  } catch(err) {
+    showToast('적용 실패', 'error');
+  }
+}
+
+function pollProjectStatus(projectId) {
+  const interval = setInterval(async () => {
+    try {
+      const p = await API.get(`/api/documents/merge-projects/${projectId}/`);
+      if (!['analyzing', 'merging'].includes(p.status)) {
+        clearInterval(interval);
+        openProject(projectId);
+      }
+    } catch(err) {
+      clearInterval(interval);
+    }
+  }, 2000);
+}
+
+document.addEventListener('DOMContentLoaded', loadProjects);
+</script>
+{% endblock %}

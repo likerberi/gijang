@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}문서 관리 - DocMerge{% endblock %}
+{% block nav_documents %}active{% endblock %}
+{% block page_title %}문서 관리{% endblock %}
+
+{% block top_actions %}
+<button class="btn btn-primary" id="btn-upload">📤 파일 업로드</button>
+{% endblock %}
+
+{% block content %}
+<!-- 필터 -->
+<div class="filter-bar">
+  <select id="filter-type" class="form-select">
+    <option value="">전체 유형</option>
+    <option value="excel">엑셀</option>
+    <option value="pdf">PDF</option>
+    <option value="image">이미지</option>
+  </select>
+  <select id="filter-status" class="form-select">
+    <option value="">전체 상태</option>
+    <option value="pending">대기중</option>
+    <option value="processing">처리중</option>
+    <option value="completed">완료</option>
+    <option value="failed">실패</option>
+  </select>
+  <input type="text" id="filter-search" class="form-input" placeholder="파일명 검색...">
+</div>
+
+<!-- 문서 테이블 -->
+<div class="table-wrap">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>파일명</th>
+        <th>유형</th>
+        <th>상태</th>
+        <th>크기</th>
+        <th>업로드일</th>
+        <th>작업</th>
+      </tr>
+    </thead>
+    <tbody id="docs-body">
+      <tr><td colspan="6" class="empty-state">로딩 중...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 페이지네이션 -->
+<div class="pagination" id="pagination"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentPage = 1;
+
+async function loadDocuments(page = 1) {
+  const type = document.getElementById('filter-type').value;
+  const status = document.getElementById('filter-status').value;
+  const search = document.getElementById('filter-search').value;
+
+  let url = `/api/documents/documents/?page=${page}`;
+  if (type) url += `&file_type=${type}`;
+  if (status) url += `&status=${status}`;
+  if (search) url += `&search=${encodeURIComponent(search)}`;
+
+  try {
+    const data = await API.get(url);
+    const results = data.results || [];
+    const tbody = document.getElementById('docs-body');
+
+    if (results.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">문서가 없습니다</td></tr>';
+    } else {
+      tbody.innerHTML = results.map(d => `
+        <tr>
+          <td><strong>${escapeHtml(d.original_filename)}</strong></td>
+          <td><span class="badge badge-type">${d.file_type}</span></td>
+          <td>${statusBadge(d.status)}</td>
+          <td>${formatSize(d.file_size)}</td>
+          <td>${formatDate(d.created_at)}</td>
+          <td class="actions">
+            ${d.status === 'completed' ? `<a href="/app/documents/${d.id}/" class="btn btn-xs btn-primary">📊 거래내역</a>` : ''}
+            ${d.status === 'completed' ? `<button class="btn btn-xs btn-ghost" onclick="viewExtracted(${d.id})">👁 미리보기</button>` : ''}
+            ${d.status === 'failed' ? `<button class="btn btn-xs btn-ghost" onclick="reprocess(${d.id})">🔄 재처리</button>` : ''}
+            <button class="btn btn-xs btn-danger" onclick="deleteDoc(${d.id})">🗑</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // 페이지네이션
+    renderPagination(data, page);
+    currentPage = page;
+  } catch (err) {
+    console.error(err);
+    showToast('문서 목록을 불러올 수 없습니다', 'error');
+  }
+}
+
+function renderPagination(data, page) {
+  const pag = document.getElementById('pagination');
+  const total = data.count || 0;
+  const pages = Math.ceil(total / 20);
+  if (pages <= 1) { pag.innerHTML = ''; return; }
+
+  let html = '';
+  for (let i = 1; i <= pages; i++) {
+    html += `<button class="btn btn-sm ${i === page ? 'btn-primary' : 'btn-ghost'}" onclick="loadDocuments(${i})">${i}</button> `;
+  }
+  pag.innerHTML = html;
+}
+
+// 업로드 모달
+document.getElementById('btn-upload').addEventListener('click', () => {
+  showModal('파일 업로드', `
+    <form id="upload-form">
+      <div class="form-group">
+        <label>파일 선택</label>
+        <input type="file" id="upload-file" accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png" required>
+      </div>
+      <div class="form-group">
+        <label>파일 유형</label>
+        <select id="upload-type" class="form-select" required>
+          <option value="excel">엑셀</option>
+          <option value="pdf">PDF</option>
+          <option value="image">이미지</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">업로드</button>
+    </form>
+  `);
+
+  document.getElementById('upload-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const file = document.getElementById('upload-file').files[0];
+    const fileType = document.getElementById('upload-type').value;
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('file_type', fileType);
+
+    try {
+      await API.upload('/api/documents/documents/', formData);
+      closeModal();
+      showToast('파일이 업로드되었습니다');
+      loadDocuments(currentPage);
+    } catch (err) {
+      showToast(err.message || '업로드 실패', 'error');
+    }
+  });
+});
+
+async function viewExtracted(docId) {
+  try {
+    const data = await API.get(`/api/documents/documents/${docId}/extracted_data/`);
+    showModal('추출 데이터', `
+      <div class="detail-grid">
+        <div class="detail-item"><span class="detail-label">총 행 수</span><span class="detail-value">${data.total_rows || 0}</span></div>
+        <div class="detail-item"><span class="detail-label">총 페이지</span><span class="detail-value">${data.total_pages || 0}</span></div>
+        <div class="detail-item"><span class="detail-label">텍스트 길이</span><span class="detail-value">${(data.extracted_text || '').length.toLocaleString()}자</span></div>
+      </div>
+      ${data.structured_data && data.structured_data.headers ? `
+        <h4 style="margin-top:1rem;">구조화 데이터</h4>
+        <div class="table-wrap" style="max-height:300px; overflow:auto;">
+          <table class="table table-sm">
+            <thead><tr>${data.structured_data.headers.map(h => `<th>${escapeHtml(String(h || ''))}</th>`).join('')}</tr></thead>
+            <tbody>${(data.structured_data.rows || []).slice(0, 20).map(row =>
+              `<tr>${row.map(cell => `<td>${escapeHtml(String(cell ?? ''))}</td>`).join('')}</tr>`
+            ).join('')}</tbody>
+          </table>
+          ${(data.structured_data.rows || []).length > 20 ? '<p class="text-muted">... 처음 20행만 표시</p>' : ''}
+        </div>
+      ` : ''}
+    `);
+  } catch (err) {
+    showToast('데이터를 불러올 수 없습니다', 'error');
+  }
+}
+
+async function reprocess(docId) {
+  try {
+    await API.post(`/api/documents/documents/${docId}/reprocess/`);
+    showToast('재처리가 시작되었습니다');
+    loadDocuments(currentPage);
+  } catch (err) {
+    showToast('재처리 요청 실패', 'error');
+  }
+}
+
+async function deleteDoc(docId) {
+  if (!confirm('정말 삭제하시겠습니까?')) return;
+  try {
+    await API.delete(`/api/documents/documents/${docId}/`);
+    showToast('삭제되었습니다');
+    loadDocuments(currentPage);
+  } catch (err) {
+    showToast('삭제 실패', 'error');
+  }
+}
+
+// 필터 이벤트
+document.getElementById('filter-type').addEventListener('change', () => loadDocuments(1));
+document.getElementById('filter-status').addEventListener('change', () => loadDocuments(1));
+let searchTimer;
+document.getElementById('filter-search').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadDocuments(1), 400);
+});
+
+document.addEventListener('DOMContentLoaded', () => loadDocuments(1));
+</script>
+{% endblock %}

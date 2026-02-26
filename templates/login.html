@@ -1,0 +1,132 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>로그인 - DocMerge</title>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="auth-page">
+  <div class="auth-container">
+    <div class="auth-card">
+      <div class="auth-header">
+        <h1>📄 DocMerge</h1>
+        <p>문서 처리 자동화 플랫폼</p>
+        <a href="/guide/" style="display:inline-block;margin-top:.75rem;font-size:.85rem;color:#4f46e5;">❓ 사용 가이드 보기</a>
+      </div>
+
+      <!-- 로그인 폼 -->
+      <div id="login-form-wrap">
+        <h2>로그인</h2>
+        <form id="login-form">
+          <div class="form-group">
+            <label for="login-username">아이디</label>
+            <input type="text" id="login-username" placeholder="아이디를 입력하세요" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="login-password">비밀번호</label>
+            <input type="password" id="login-password" placeholder="비밀번호를 입력하세요" required autocomplete="current-password">
+          </div>
+          <div class="form-error" id="login-error" style="display:none;"></div>
+          <button type="submit" class="btn btn-primary btn-full">로그인</button>
+        </form>
+        <p class="auth-switch">계정이 없으신가요? <a href="#" id="show-register">회원가입</a></p>
+      </div>
+
+      <!-- 회원가입 폼 -->
+      <div id="register-form-wrap" style="display:none;">
+        <h2>회원가입</h2>
+        <form id="register-form">
+          <div class="form-group">
+            <label for="reg-username">아이디</label>
+            <input type="text" id="reg-username" placeholder="아이디" required minlength="3" autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="reg-email">이메일</label>
+            <input type="email" id="reg-email" placeholder="이메일" required autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label for="reg-password">비밀번호</label>
+            <input type="password" id="reg-password" placeholder="8자 이상" required minlength="8" autocomplete="new-password">
+          </div>
+          <div class="form-group">
+            <label for="reg-password2">비밀번호 확인</label>
+            <input type="password" id="reg-password2" placeholder="비밀번호 재입력" required autocomplete="new-password">
+          </div>
+          <div class="form-error" id="register-error" style="display:none;"></div>
+          <button type="submit" class="btn btn-primary btn-full">가입하기</button>
+        </form>
+        <p class="auth-switch">이미 계정이 있으신가요? <a href="#" id="show-login">로그인</a></p>
+      </div>
+    </div>
+  </div>
+
+  <script src="{% static 'js/api.js' %}"></script>
+  <script>
+    // 폼 전환
+    document.getElementById('show-register').addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('login-form-wrap').style.display = 'none';
+      document.getElementById('register-form-wrap').style.display = 'block';
+    });
+    document.getElementById('show-login').addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('register-form-wrap').style.display = 'none';
+      document.getElementById('login-form-wrap').style.display = 'block';
+    });
+
+    // 이미 로그인 상태면 대시보드로
+    if (API.getToken()) {
+      window.location.href = '/app/';
+    }
+
+    // 로그인
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('login-error');
+      errEl.style.display = 'none';
+
+      const username = document.getElementById('login-username').value;
+      const password = document.getElementById('login-password').value;
+
+      try {
+        const data = await API.login(username, password);
+        window.location.href = '/app/';
+      } catch (err) {
+        errEl.textContent = err.message || '로그인에 실패했습니다.';
+        errEl.style.display = 'block';
+      }
+    });
+
+    // 회원가입
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('register-error');
+      errEl.style.display = 'none';
+
+      const username = document.getElementById('reg-username').value;
+      const email = document.getElementById('reg-email').value;
+      const password = document.getElementById('reg-password').value;
+      const password2 = document.getElementById('reg-password2').value;
+
+      if (password !== password2) {
+        errEl.textContent = '비밀번호가 일치하지 않습니다.';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      try {
+        await API.register(username, email, password, password2);
+        // 가입 후 자동 로그인
+        await API.login(username, password);
+        window.location.href = '/app/';
+      } catch (err) {
+        errEl.textContent = err.message || '회원가입에 실패했습니다.';
+        errEl.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>
