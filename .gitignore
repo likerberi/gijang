@@ -70,3 +70,6 @@ test_*.py
 reset_stuck.py
 create_sample_*.py
 sample_*.xlsx
+
+# 내부 문서 (공개 금지)
+docs/사업기획서.md
