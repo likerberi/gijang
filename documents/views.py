@@ -17,8 +17,46 @@ from .serializers import (
 )
 from .tasks import process_document, analyze_merge_files, execute_merge
 import math
+import logging
+import time
 from datetime import datetime, date
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
+
+# Celery worker 상태 캐시 (60초)
+_worker_cache = {'available': None, 'checked_at': 0}
+
+
+def _is_celery_worker_available():
+    """Celery worker가 실행 중인지 확인 (60초 캐싱)"""
+    global _worker_cache
+    now = time.time()
+    if _worker_cache['available'] is not None and (now - _worker_cache['checked_at']) < 60:
+        return _worker_cache['available']
+    try:
+        from config.celery import app
+        result = app.control.ping(timeout=1.0)
+        available = bool(result)
+    except Exception:
+        available = False
+    _worker_cache['available'] = available
+    _worker_cache['checked_at'] = now
+    if not available:
+        logger.info("Celery worker 미감지 → 동기 모드로 전환")
+    return available
+
+
+def _dispatch_task(task, *args, **kwargs):
+    """Celery 태스크 디스패치 — worker 없으면 동기 실행"""
+    if _is_celery_worker_available():
+        return task.delay(*args, **kwargs)
+    logger.info(f"동기 실행: {task.name}({args})")
+    try:
+        return task.apply(args=args, kwargs=kwargs)
+    except Exception as e:
+        logger.error(f"동기 실행 실패: {e}", exc_info=True)
+        raise
 
 
 # ========================
@@ -310,8 +348,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         document = serializer.save()
-        # Celery 태스크 실행
-        process_document.delay(document.id)
+        _dispatch_task(process_document, document.id)
     
     @action(detail=True, methods=['post'])
     def reprocess(self, request, pk=None):
@@ -328,7 +365,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         document.error_message = ''
         document.save()
         
-        process_document.delay(document.id)
+        _dispatch_task(process_document, document.id)
         
         return Response({'message': '문서 재처리가 시작되었습니다.'})
     
@@ -419,13 +456,15 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 col_idx = int(sort_col)
                 if 0 <= col_idx < len(headers):
                     def sort_key(r):
-                        val = r[col_idx] if col_idx < len(r) else ''
-                        if val is None:
-                            return ''
+                        val = r[col_idx] if col_idx < len(r) else None
+                        if val is None or val == '' or val == '-':
+                            # None/빈칸은 항상 맨 뒤로
+                            return (1, 0, '')
+                        s = str(val).replace(',', '').replace('원', '').strip()
                         try:
-                            return float(str(val).replace(',', '').replace('원', '').strip())
+                            return (0, float(s), '')
                         except (ValueError, TypeError):
-                            return str(val).lower()
+                            return (0, float('inf'), s.lower())
                     rows = sorted(rows, key=sort_key, reverse=(sort_dir == 'desc'))
             except (ValueError, IndexError):
                 pass
@@ -1354,11 +1393,10 @@ class MergeProjectViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Celery 태스크 실행
-        analyze_merge_files.delay(project.id)
-        
         project.status = 'analyzing'
         project.save()
+        
+        _dispatch_task(analyze_merge_files, project.id)
         
         return Response({
             'message': '파일 분석이 시작되었습니다.',
@@ -1446,8 +1484,7 @@ class MergeProjectViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Celery 태스크 실행
-        execute_merge.delay(project.id)
+        _dispatch_task(execute_merge, project.id)
         
         return Response({
             'message': '병합이 시작되었습니다. 완료 후 결과를 다운로드할 수 있습니다.',
