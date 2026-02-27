@@ -302,3 +302,46 @@ class TaxEvent(models.Model):
     def __str__(self):
         return f"{self.title} ({self.due_date})"
 
+
+class ClassificationRule(models.Model):
+    """분류 학습 규칙 — 사용자 수정 이력을 축적하여 자동분류 정확도 향상
+    
+    키워드/거래처명 → 계정과목 매핑을 저장하고,
+    새 파일 업로드 시 키워드 매칭보다 우선 적용.
+    """
+    MATCH_TYPE_CHOICES = [
+        ('exact', '정확히 일치'),
+        ('contains', '포함'),
+        ('vendor', '거래처명'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                            related_name='classification_rules', verbose_name='사용자')
+    pattern = models.CharField('패턴', max_length=255,
+        help_text='매칭할 문자열 (적요 또는 거래처명)')
+    match_type = models.CharField('매칭 방식', max_length=10,
+                                 choices=MATCH_TYPE_CHOICES, default='contains')
+    category = models.CharField('계정과목', max_length=50)
+    
+    # 학습 추적
+    source = models.CharField('생성 출처', max_length=20, default='user',
+        help_text='user=수동수정, auto=자동학습, vendor=거래처기반')
+    hit_count = models.IntegerField('적용 횟수', default=0)
+    
+    priority = models.IntegerField('우선순위', default=10,
+        help_text='낮은 숫자가 높은 우선순위 (user=10, vendor=20, auto=30)')
+    
+    is_active = models.BooleanField('활성', default=True)
+    
+    created_at = models.DateTimeField('생성일', auto_now_add=True)
+    updated_at = models.DateTimeField('수정일', auto_now=True)
+    
+    class Meta:
+        verbose_name = '분류 규칙'
+        verbose_name_plural = '분류 규칙 목록'
+        ordering = ['priority', '-hit_count']
+        unique_together = ['user', 'pattern', 'match_type']
+    
+    def __str__(self):
+        return f"{self.pattern} → {self.category} ({self.get_match_type_display()})"
+

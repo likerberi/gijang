@@ -157,7 +157,9 @@ class MergeService:
                     date_columns: Optional[List[str]] = None,
                     number_columns: Optional[List[str]] = None,
                     output_path: Optional[str] = None,
-                    add_source_column: bool = True) -> dict:
+                    add_source_column: bool = True,
+                    sort_by: Optional[str] = None,
+                    auto_detect_types: bool = True) -> dict:
         """
         여러 엑셀 파일을 하나로 병합
         (2단계: 실행)
@@ -165,10 +167,12 @@ class MergeService:
         Args:
             file_paths: 병합할 파일 경로 목록
             column_mapping: 열 이름 매핑 {원본명: 표준명}
-            date_columns: 날짜 정규화 대상 열 이름 목록
-            number_columns: 숫자 정규화 대상 열 이름 목록
+            date_columns: 날짜 정규화 대상 열 이름 목록 (비어있으면 자동 감지)
+            number_columns: 숫자 정규화 대상 열 이름 목록 (비어있으면 자동 감지)
             output_path: 결과 파일 경로 (None이면 자동 생성)
             add_source_column: 소스 파일명 열 추가 여부
+            sort_by: 정렬 기준 열 이름 (None이면 날짜 열 자동 감지)
+            auto_detect_types: 날짜/숫자 열 자동 감지 여부
             
         Returns:
             병합 결과 정보
@@ -181,6 +185,40 @@ class MergeService:
             date_columns = []
         if number_columns is None:
             number_columns = []
+        
+        # 자동 타입 감지: 분석 결과에서 date/number 열을 자동으로 추가
+        auto_detected = {'date_columns': [], 'number_columns': [], 'sort_column': None}
+        if auto_detect_types and not date_columns:
+            # 먼저 분석하여 타입 정보 수집
+            analysis = self.analyze_files(file_paths)
+            for file_info in analysis.get('files', []):
+                col_types = file_info.get('column_types', {})
+                for col_name, col_type in col_types.items():
+                    if col_type == 'date' and col_name not in date_columns:
+                        if col_name not in auto_detected['date_columns']:
+                            auto_detected['date_columns'].append(col_name)
+                    elif col_type == 'number' and col_name not in number_columns:
+                        if col_name not in auto_detected['number_columns']:
+                            auto_detected['number_columns'].append(col_name)
+            
+            date_columns = list(set(date_columns + auto_detected['date_columns']))
+            number_columns = list(set(number_columns + auto_detected['number_columns']))
+            
+            # 날짜 열 중 정렬 기준 자동 결정
+            if not sort_by and date_columns:
+                date_hints = ['날짜', '거래일', '일자', '거래일자', 'date', '시간', '이용일']
+                for hint in date_hints:
+                    for dc in date_columns:
+                        if hint in dc.lower():
+                            auto_detected['sort_column'] = dc
+                            break
+                    if auto_detected['sort_column']:
+                        break
+                if not auto_detected['sort_column']:
+                    auto_detected['sort_column'] = date_columns[0]
+                sort_by = auto_detected['sort_column']
+        
+        logger.info(f"병합 설정: date_columns={date_columns}, number_columns={number_columns}, sort_by={sort_by}")
         
         all_data = []
         merge_log = []
@@ -231,6 +269,19 @@ class MergeService:
         # 통합 헤더 생성
         unified_headers = self._build_unified_headers(all_data, add_source_column)
         
+        # ★ 정렬: sort_by 열 기준으로 전체 데이터 정렬
+        if sort_by and sort_by in unified_headers:
+            logger.info(f"병합 결과를 '{sort_by}' 기준으로 정렬합니다.")
+            def _sort_key(row):
+                val = row.get(sort_by, '')
+                if val is None:
+                    return ''
+                return str(val)
+            all_data.sort(key=_sort_key)
+        
+        # ★ 중복 탐지: 같은 날짜+금액+적요 조합이면 의심 중복
+        duplicates = self._detect_duplicates(all_data, unified_headers)
+        
         # 출력 파일 생성
         if output_path is None:
             output_dir = os.path.dirname(file_paths[0]) if file_paths else '.'
@@ -249,6 +300,9 @@ class MergeService:
             'unified_headers': unified_headers,
             'merge_log': merge_log,
             'errors': errors,
+            'auto_detected': auto_detected,
+            'sorted_by': sort_by,
+            'duplicates': duplicates,
         }
     
     def _process_single_file(self, file_path: str, 
@@ -308,6 +362,47 @@ class MergeService:
             'header_row_index': meta_info['header_row_index'],
             'original_headers': headers,
             'mapped_headers': mapped_headers,
+        }
+    
+    def _detect_duplicates(self, all_data: List[Dict], headers: List[str]) -> dict:
+        """중복 행 탐지 — 같은 값 조합이 여러 소스 파일에서 나타나면 의심 중복"""
+        seen = {}  # signature -> [indices]
+        duplicates = []
+        
+        # 서명 생성 열: __source_file__ 제외한 모든 값
+        for idx, row in enumerate(all_data):
+            sig_parts = []
+            for h in headers:
+                if h == '__source_file__':
+                    continue
+                val = row.get(h, '')
+                sig_parts.append(str(val) if val is not None else '')
+            signature = '|'.join(sig_parts)
+            
+            if signature in seen:
+                seen[signature].append(idx)
+            else:
+                seen[signature] = [idx]
+        
+        for sig, indices in seen.items():
+            if len(indices) > 1:
+                # 서로 다른 소스 파일에서 왔는지 확인
+                sources = set()
+                for i in indices:
+                    src = all_data[i].get('__source_file__', f'row_{i}')
+                    sources.add(src)
+                
+                if len(sources) > 1:  # 다른 파일에서 같은 데이터 = 실제 중복 가능성
+                    duplicates.append({
+                        'rows': indices,
+                        'sources': list(sources),
+                        'count': len(indices),
+                        'sample': sig[:200],
+                    })
+        
+        return {
+            'total_suspected': len(duplicates),
+            'details': duplicates[:50],  # 최대 50건
         }
     
     def _build_unified_headers(self, all_data: List[Dict], add_source: bool) -> List[str]:

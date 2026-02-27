@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Document, ExtractedData, Report, MergeProject, MergeFile, ColumnMappingTemplate, Vendor, TaxEvent
+from .models import Document, ExtractedData, Report, MergeProject, MergeFile, ColumnMappingTemplate, Vendor, TaxEvent, ClassificationRule
 
 
 @admin.register(Document)
@@ -90,4 +90,14 @@ class TaxEventAdmin(admin.ModelAdmin):
     search_fields = ('title', 'description', 'user__username')
     readonly_fields = ('created_at', 'updated_at')
     ordering = ('due_date',)
+
+
+@admin.register(ClassificationRule)
+class ClassificationRuleAdmin(admin.ModelAdmin):
+    list_display = ('pattern', 'category', 'match_type', 'source', 'hit_count',
+                   'priority', 'is_active', 'user', 'updated_at')
+    list_filter = ('match_type', 'source', 'category', 'is_active')
+    search_fields = ('pattern', 'category', 'user__username')
+    readonly_fields = ('created_at', 'updated_at', 'hit_count')
+    ordering = ('priority', '-hit_count')
 

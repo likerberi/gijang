@@ -5,7 +5,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from .models import Document, ExtractedData, Report, MergeProject, MergeFile, ColumnMappingTemplate, Vendor
+from django.db.models import F
+from .models import Document, ExtractedData, Report, MergeProject, MergeFile, ColumnMappingTemplate, Vendor, ClassificationRule
 from .serializers import (
     DocumentSerializer, DocumentUploadSerializer,
     ExtractedDataSerializer, ReportSerializer,
@@ -87,6 +88,42 @@ def classify_transaction(description):
             if kw in desc:
                 return category
     return '미분류'
+
+
+def classify_transaction_with_rules(description, user=None):
+    """사용자 학습 규칙을 우선 적용하는 분류 함수
+    
+    우선순위: 사용자 exact 매칭 → 사용자 contains 매칭 → 키워드 기본 분류
+    """
+    if not description:
+        return '미분류'
+    desc = str(description).strip()
+    
+    # 1) 사용자 학습 규칙 적용 (우선순위 순)
+    if user:
+        rules = ClassificationRule.objects.filter(
+            user=user, is_active=True
+        ).order_by('priority', '-hit_count')
+        
+        for rule in rules:
+            if rule.match_type == 'exact' and rule.pattern == desc:
+                ClassificationRule.objects.filter(pk=rule.pk).update(
+                    hit_count=F('hit_count') + 1
+                )
+                return rule.category
+            elif rule.match_type == 'contains' and rule.pattern in desc:
+                ClassificationRule.objects.filter(pk=rule.pk).update(
+                    hit_count=F('hit_count') + 1
+                )
+                return rule.category
+            elif rule.match_type == 'vendor' and rule.pattern in desc:
+                ClassificationRule.objects.filter(pk=rule.pk).update(
+                    hit_count=F('hit_count') + 1
+                )
+                return rule.category
+    
+    # 2) 기본 키워드 분류
+    return classify_transaction(desc)
 
 
 def compute_financial_summary(structured_data):
@@ -399,15 +436,23 @@ class DocumentViewSet(viewsets.ModelViewSet):
         start = (page - 1) * page_size
         end = start + page_size
         
-        # 각 행에 계정과목 분류 추가
+        # 각 행에 계정과목 분류 추가 (사용자 학습 규칙 우선)
         page_rows = []
-        for row in rows[start:end]:
-            cat = '미분류'
-            if desc_idx is not None and desc_idx < len(row):
-                cat = classify_transaction(row[desc_idx])
+        user_classifications = (extracted.metadata or {}).get('user_classifications', {})
+        global_start = start  # 전체 데이터에서의 시작 인덱스
+        for i, row in enumerate(rows[start:end]):
+            row_global_idx = start + i
+            # 1) 사용자가 수동 지정한 분류 우선
+            if str(row_global_idx) in user_classifications:
+                cat = user_classifications[str(row_global_idx)]
+            elif desc_idx is not None and desc_idx < len(row):
+                cat = classify_transaction_with_rules(row[desc_idx], user=request.user)
+            else:
+                cat = '미분류'
             page_rows.append({
                 'cells': row,
                 'category': cat,
+                'user_classified': str(row_global_idx) in user_classifications,
             })
         
         # 재무 요약
@@ -585,10 +630,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def classify(self, request, pk=None):
-        """거래 분류 수동 업데이트
+        """거래 분류 수동 업데이트 + 학습
         
         body: { "classifications": { "row_index": "계정과목", ... } }
-        사용자가 수동으로 지정한 계정과목을 저장
+        사용자가 수동으로 지정한 계정과목을 저장하고,
+        적요 패턴을 ClassificationRule로 학습시킴
         """
         document = self.get_object()
         
@@ -615,9 +661,46 @@ class DocumentViewSet(viewsets.ModelViewSet):
         extracted.metadata = meta
         extracted.save()
         
+        # ★ 학습: 적요 → 계정과목 매핑을 ClassificationRule에 저장
+        sd = extracted.structured_data
+        headers = sd.get('headers', [])
+        rows = sd.get('rows', [])
+        fin_cols = detect_financial_columns(headers)
+        desc_idx = fin_cols.get('description')
+        
+        rules_created = 0
+        rules_updated = 0
+        
+        if desc_idx is not None:
+            for row_index_str, category in classifications.items():
+                try:
+                    row_idx = int(row_index_str)
+                    if 0 <= row_idx < len(rows) and desc_idx < len(rows[row_idx]):
+                        desc = str(rows[row_idx][desc_idx]).strip()
+                        if desc and len(desc) >= 2:
+                            rule, created = ClassificationRule.objects.update_or_create(
+                                user=request.user,
+                                pattern=desc,
+                                match_type='exact',
+                                defaults={
+                                    'category': category,
+                                    'source': 'user',
+                                    'priority': 10,
+                                }
+                            )
+                            if created:
+                                rules_created += 1
+                            else:
+                                rules_updated += 1
+                                rule.hit_count += 1
+                                rule.save()
+                except (ValueError, IndexError):
+                    pass
+        
         return Response({
             'message': f'{len(classifications)}건의 분류가 저장되었습니다.',
             'total_classified': len(user_classifications),
+            'rules_learned': rules_created + rules_updated,
         })
 
     # ========================
