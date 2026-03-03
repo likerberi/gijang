@@ -358,3 +358,7 @@ Celery worker 터미널에서 실시간 로그를 확인할 수 있습니다.
 ## 라이선스
 
 이 프로젝트는 내부 사용을 위한 것입니다.
+
+## 개발 도구
+
+이 프로젝트는 [GitHub Copilot](https://github.com/features/copilot)의 도움을 받아 개발되었습니다.
