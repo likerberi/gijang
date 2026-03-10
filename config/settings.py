@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     # Local apps
     'users',
     'documents',
+    'automation',
 ]
 
 MIDDLEWARE = [

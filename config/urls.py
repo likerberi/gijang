@@ -24,6 +24,7 @@ from .frontend_views import (
     login_view, dashboard_view, documents_view, document_detail_view,
     merge_view, mapping_templates_view, guide_view,
     vat_report_view, monthly_report_view, vendors_view, tax_calendar_view,
+    automation_view,
 )
 
 urlpatterns = [
@@ -38,6 +39,7 @@ urlpatterns = [
     path('app/templates/', mapping_templates_view, name='mapping-templates'),
     path('app/vendors/', vendors_view, name='vendors'),
     path('app/tax-calendar/', tax_calendar_view, name='tax-calendar'),
+    path('app/automation/', automation_view, name='automation'),
     path('guide/', guide_view, name='guide'),
 
     # API
@@ -45,6 +47,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/users/', include('users.urls')),
     path('api/documents/', include('documents.urls')),
+    path('api/automation/', include('automation.urls')),
     
     # API Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
