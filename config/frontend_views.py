@@ -56,3 +56,8 @@ def vendors_view(request):
 def tax_calendar_view(request):
     """세금 달력"""
     return render(request, 'tax_calendar.html')
+
+
+def automation_view(request):
+    """웹 자동화"""
+    return render(request, 'automation.html')

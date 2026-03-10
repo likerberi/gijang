@@ -1,0 +1,539 @@
+{% extends "base.html" %}
+{% block title %}웹 자동화{% endblock %}
+{% block nav_automation %}active{% endblock %}
+{% block page_title %}🤖 웹 자동화{% endblock %}
+
+{% block top_actions %}
+<button class="btn btn-primary" onclick="showCreateModal()">+ 새 작업</button>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ===== 레이아웃 ===== */
+.auto-grid { display: grid; gap: 1.5rem; }
+.auto-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.auto-header h3 { font-size: 1.1rem; font-weight: 600; }
+
+/* ===== 카드 ===== */
+.task-card {
+  background: var(--bg-card, #fff); border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px; padding: 1.25rem; transition: box-shadow .15s;
+}
+.task-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+.task-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: .75rem; }
+.task-card-title { font-weight: 600; font-size: 1rem; }
+.task-card-url { font-size: .8rem; color: var(--text-muted, #6b7280); word-break: break-all; }
+.task-card-meta { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: .75rem; font-size: .8rem; color: var(--text-muted, #6b7280); }
+.task-card-actions { display: flex; gap: .5rem; margin-top: 1rem; }
+
+/* ===== 뱃지 ===== */
+.badge { display: inline-block; padding: .15rem .6rem; border-radius: 9999px; font-size: .75rem; font-weight: 500; }
+.badge-draft { background: #f3f4f6; color: #6b7280; }
+.badge-ready { background: #dbeafe; color: #2563eb; }
+.badge-running { background: #fef3c7; color: #d97706; animation: pulse 1.5s infinite; }
+.badge-success { background: #d1fae5; color: #059669; }
+.badge-failed { background: #fee2e2; color: #dc2626; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .6; } }
+
+/* ===== 스텝 빌더 ===== */
+.step-builder { margin-top: 1rem; }
+.step-item {
+  display: grid; grid-template-columns: 40px 120px 1fr 1fr 80px 40px; gap: .5rem;
+  align-items: center; padding: .5rem; border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px; margin-bottom: .5rem; background: #fafafa;
+}
+.step-item input, .step-item select { font-size: .85rem; padding: .35rem .5rem; border: 1px solid #d1d5db; border-radius: 6px; }
+.step-num { font-weight: 600; color: #6b7280; text-align: center; }
+
+/* ===== 실행 로그 ===== */
+.run-log { background: #1e1e2e; color: #cdd6f4; border-radius: 8px; padding: 1rem; max-height: 300px; overflow-y: auto; font-family: 'Fira Code', monospace; font-size: .8rem; line-height: 1.6; }
+.run-log .log-info { color: #89b4fa; }
+.run-log .log-error { color: #f38ba8; }
+.run-log .log-warning { color: #fab387; }
+
+/* ===== 프리셋 ===== */
+.preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-top: 1rem; }
+.preset-card {
+  border: 2px dashed #d1d5db; border-radius: 12px; padding: 1.25rem; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.preset-card:hover { border-color: #3b82f6; background: #eff6ff; }
+.preset-card h4 { font-size: .95rem; font-weight: 600; margin-bottom: .5rem; }
+.preset-card p { font-size: .8rem; color: #6b7280; }
+
+/* ===== 빈 상태 ===== */
+.empty-state { text-align: center; padding: 3rem; color: #9ca3af; }
+.empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+
+/* ===== 모달 폼 ===== */
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; font-weight: 500; margin-bottom: .25rem; font-size: .85rem; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: .5rem .75rem; border: 1px solid #d1d5db; border-radius: 8px; font-size: .9rem;
+}
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.form-check { display: flex; align-items: center; gap: .5rem; }
+.form-check input[type="checkbox"] { width: 18px; height: 18px; }
+
+/* ===== 기간 버튼 ===== */
+.period-btns { display: flex; gap: .5rem; flex-wrap: wrap; }
+.period-btn {
+  padding: .4rem .8rem; border: 1px solid #d1d5db; border-radius: 8px;
+  background: #fff; cursor: pointer; font-size: .85rem; transition: all .15s;
+}
+.period-btn.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.date-range-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-top: .75rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="auto-grid">
+  <!-- 작업 목록 -->
+  <section>
+    <div class="auto-header">
+      <h3>자동화 작업 목록</h3>
+      <button class="btn btn-sm btn-ghost" onclick="loadPresets()">📦 프리셋 보기</button>
+    </div>
+    <div id="task-list">
+      <div class="empty-state">
+        <div class="icon">🤖</div>
+        <p>아직 자동화 작업이 없습니다</p>
+        <p style="font-size:.8rem; margin-top:.5rem;">위의 <strong>+ 새 작업</strong> 버튼 또는 프리셋에서 시작하세요</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 프리셋 영역 (토글) -->
+  <section id="presets-section" style="display:none;">
+    <div class="auto-header">
+      <h3>📦 작업 프리셋</h3>
+      <button class="btn btn-sm btn-ghost" onclick="document.getElementById('presets-section').style.display='none'">닫기</button>
+    </div>
+    <p style="font-size:.85rem; color:#6b7280; margin-bottom:.75rem;">프리셋을 선택하면 작업이 자동으로 생성됩니다. 셀렉터를 실제 사이트에 맞게 수정하세요.</p>
+    <div id="presets-grid" class="preset-grid"></div>
+  </section>
+
+  <!-- 작업 상세 / 스텝 편집 -->
+  <section id="detail-section" style="display:none;">
+    <div class="auto-header">
+      <h3 id="detail-title">작업 상세</h3>
+      <div style="display:flex; gap:.5rem;">
+        <button class="btn btn-sm btn-ghost" onclick="dryRun()">🔍 드라이런</button>
+        <button class="btn btn-sm btn-primary" onclick="runTask()" id="btn-run">▶ 실행</button>
+        <button class="btn btn-sm btn-ghost" onclick="closeDetail()">닫기</button>
+      </div>
+    </div>
+
+    <!-- 기본 정보 -->
+    <div class="task-card" style="margin-bottom:1rem;">
+      <div id="detail-info"></div>
+    </div>
+
+    <!-- 스텝 빌더 -->
+    <div class="task-card" style="margin-bottom:1rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem;">
+        <h4 style="font-weight:600;">실행 스텝</h4>
+        <div style="display:flex; gap:.5rem;">
+          <button class="btn btn-sm btn-ghost" onclick="addStep()">+ 스텝 추가</button>
+          <button class="btn btn-sm btn-primary" onclick="saveSteps()">스텝 저장</button>
+        </div>
+      </div>
+      <div id="step-list" class="step-builder"></div>
+    </div>
+
+    <!-- 실행 기록 -->
+    <div class="task-card">
+      <h4 style="font-weight:600; margin-bottom:.75rem;">실행 기록</h4>
+      <div id="run-list"></div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const ACTIONS = [
+  {value:'goto', label:'페이지 이동'},
+  {value:'click', label:'클릭'},
+  {value:'fill', label:'입력'},
+  {value:'select_date', label:'날짜 선택'},
+  {value:'set_period', label:'기간 버튼'},
+  {value:'wait', label:'대기'},
+  {value:'download', label:'다운로드'},
+  {value:'screenshot', label:'스크린샷'},
+  {value:'scroll', label:'스크롤'},
+  {value:'select_option', label:'드롭다운'},
+];
+
+let tasks = [];
+let currentTask = null;
+let currentSteps = [];
+
+// ===== 초기 로드 =====
+document.addEventListener('DOMContentLoaded', () => {
+  loadTasks();
+});
+
+async function loadTasks() {
+  try {
+    const data = await API.get('/api/automation/tasks/');
+    tasks = data.results || data;
+    renderTaskList();
+  } catch(e) {
+    console.error('loadTasks error:', e);
+  }
+}
+
+function renderTaskList() {
+  const el = document.getElementById('task-list');
+  if (!tasks.length) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">🤖</div><p>아직 자동화 작업이 없습니다</p><p style="font-size:.8rem; margin-top:.5rem;">위의 <strong>+ 새 작업</strong> 버튼 또는 프리셋에서 시작하세요</p></div>`;
+    return;
+  }
+  el.innerHTML = tasks.map(t => `
+    <div class="task-card" style="margin-bottom:1rem;">
+      <div class="task-card-header">
+        <div>
+          <div class="task-card-title">${escapeHtml(t.name)}</div>
+          <div class="task-card-url">${escapeHtml(t.target_url)}</div>
+        </div>
+        <span class="badge badge-${t.status}">${escapeHtml(t.status_display)}</span>
+      </div>
+      ${t.description ? `<p style="font-size:.85rem; color:#6b7280;">${escapeHtml(t.description)}</p>` : ''}
+      <div class="task-card-meta">
+        <span>📅 ${escapeHtml(t.period_display)}</span>
+        <span>📝 ${t.step_count || 0}스텝</span>
+        <span>🔄 ${t.run_count || 0}회 실행</span>
+        ${t.last_run_at ? `<span>⏱ ${new Date(t.last_run_at).toLocaleString('ko')}</span>` : ''}
+      </div>
+      <div class="task-card-actions">
+        <button class="btn btn-sm btn-primary" onclick="openDetail(${t.id})">상세/편집</button>
+        <button class="btn btn-sm btn-ghost" onclick="quickRun(${t.id})">▶ 실행</button>
+        <button class="btn btn-sm btn-ghost" onclick="deleteTask(${t.id})" style="color:#dc2626;">삭제</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ===== 작업 생성 모달 =====
+function showCreateModal() {
+  document.getElementById('modal-title').textContent = '새 자동화 작업';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="form-group">
+      <label>작업 이름</label>
+      <input id="f-name" placeholder="예: 홈택스 세금계산서 다운로드">
+    </div>
+    <div class="form-group">
+      <label>대상 URL</label>
+      <input id="f-url" type="url" placeholder="https://www.example.com">
+    </div>
+    <div class="form-group">
+      <label>설명</label>
+      <textarea id="f-desc" rows="2" placeholder="어떤 작업인지 간단히"></textarea>
+    </div>
+    <div class="form-group">
+      <label>기간 설정</label>
+      <div class="period-btns" id="f-period-btns">
+        <button class="period-btn" data-period="1d" onclick="selectPeriod(this)">1일</button>
+        <button class="period-btn active" data-period="1m" onclick="selectPeriod(this)">1개월</button>
+        <button class="period-btn" data-period="7d" onclick="selectPeriod(this)">1주일</button>
+        <button class="period-btn" data-period="1y" onclick="selectPeriod(this)">1년</button>
+        <button class="period-btn" data-period="custom" onclick="selectPeriod(this)">사용자 지정</button>
+      </div>
+      <div class="date-range-inputs" id="f-custom-dates" style="display:none;">
+        <div class="form-group"><label>시작일</label><input id="f-date-from" type="date"></div>
+        <div class="form-group"><label>종료일</label><input id="f-date-to" type="date"></div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>다운로드 형식</label>
+        <select id="f-format">
+          <option value="xlsx">Excel (.xlsx)</option>
+          <option value="csv">CSV</option>
+          <option value="pdf">PDF</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <div class="form-check" style="margin-top:1.5rem;">
+          <input type="checkbox" id="f-login">
+          <label for="f-login">로그인 필요</label>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="createTask()">생성</button>
+  `;
+  openModal();
+}
+
+function selectPeriod(btn) {
+  document.querySelectorAll('#f-period-btns .period-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('f-custom-dates').style.display = btn.dataset.period === 'custom' ? 'grid' : 'none';
+}
+
+async function createTask() {
+  const selectedPeriod = document.querySelector('#f-period-btns .active')?.dataset.period || '1m';
+  const body = {
+    name: document.getElementById('f-name').value,
+    target_url: document.getElementById('f-url').value,
+    description: document.getElementById('f-desc').value,
+    period_type: selectedPeriod,
+    download_format: document.getElementById('f-format').value,
+    login_required: document.getElementById('f-login').checked,
+  };
+  if (selectedPeriod === 'custom') {
+    body.date_from = document.getElementById('f-date-from').value || null;
+    body.date_to = document.getElementById('f-date-to').value || null;
+  }
+
+  try {
+    const result = await API.post('/api/automation/tasks/', body);
+    showToast('작업이 생성되었습니다', 'success');
+    closeModal();
+    loadTasks();
+    openDetail(result.id);
+  } catch(e) {
+    showToast('생성 실패: ' + (e.message || ''), 'error');
+  }
+}
+
+// ===== 프리셋 =====
+async function loadPresets() {
+  const section = document.getElementById('presets-section');
+  section.style.display = 'block';
+  try {
+    const data = await API.get('/api/automation/tasks/presets/');
+    const presets = Array.isArray(data) ? data : data.results || [];
+    const grid = document.getElementById('presets-grid');
+    grid.innerHTML = presets.map((p, i) => `
+      <div class="preset-card" onclick="usePreset(${i})">
+        <h4>${escapeHtml(p.name)}</h4>
+        <p>${escapeHtml(p.target_url)}</p>
+        <p style="margin-top:.25rem;">${p.steps?.length || 0}스텝 · ${p.period_type} · ${p.download_format}</p>
+      </div>
+    `).join('');
+    window._presets = presets;
+  } catch(e) {
+    showToast('프리셋 로드 실패', 'error');
+  }
+}
+
+async function usePreset(idx) {
+  const p = window._presets[idx];
+  try {
+    const result = await API.post('/api/automation/tasks/', {
+      name: p.name,
+      target_url: p.target_url,
+      login_required: p.login_required || false,
+      period_type: p.period_type || '1m',
+      download_format: p.download_format || 'xlsx',
+      steps: p.steps || [],
+    });
+    showToast(`프리셋 "${p.name}" 으로 작업 생성됨`, 'success');
+    document.getElementById('presets-section').style.display = 'none';
+    loadTasks();
+    openDetail(result.id);
+  } catch(e) {
+    showToast('프리셋 적용 실패', 'error');
+  }
+}
+
+// ===== 작업 상세 =====
+async function openDetail(taskId) {
+  try {
+    const data = await API.get(`/api/automation/tasks/${taskId}/`);
+    currentTask = data;
+    currentSteps = (data.step_list || []).map((s, i) => ({...s, order: i}));
+    if (!currentSteps.length && data.steps?.length) {
+      currentSteps = data.steps.map((s, i) => ({...s, order: i}));
+    }
+
+    document.getElementById('detail-section').style.display = 'block';
+    document.getElementById('detail-title').textContent = data.name;
+
+    // 기본 정보
+    document.getElementById('detail-info').innerHTML = `
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1rem;">
+        <div><strong>URL</strong><br><a href="${escapeHtml(data.target_url)}" target="_blank" style="font-size:.85rem; word-break:break-all;">${escapeHtml(data.target_url)}</a></div>
+        <div><strong>기간</strong><br>${escapeHtml(data.period_display)}${data.date_from ? ` (${data.date_from} ~ ${data.date_to})` : ''}</div>
+        <div><strong>다운로드</strong><br>${data.download_format.toUpperCase()}</div>
+        <div><strong>상태</strong><br><span class="badge badge-${data.status}">${escapeHtml(data.status_display)}</span></div>
+      </div>
+    `;
+
+    renderStepBuilder();
+    loadRuns(taskId);
+  } catch(e) {
+    showToast('작업 상세 로드 실패', 'error');
+  }
+}
+
+function closeDetail() {
+  document.getElementById('detail-section').style.display = 'none';
+  currentTask = null;
+}
+
+// ===== 스텝 빌더 =====
+function renderStepBuilder() {
+  const el = document.getElementById('step-list');
+  if (!currentSteps.length) {
+    el.innerHTML = '<p style="color:#9ca3af; font-size:.85rem;">스텝이 없습니다. "스텝 추가"를 눌러 워크플로우를 구성하세요.</p>';
+    return;
+  }
+  el.innerHTML = currentSteps.map((s, i) => `
+    <div class="step-item" data-idx="${i}">
+      <span class="step-num">${i + 1}</span>
+      <select onchange="updateStep(${i},'action',this.value)">
+        ${ACTIONS.map(a => `<option value="${a.value}" ${s.action === a.value ? 'selected' : ''}>${a.label}</option>`).join('')}
+      </select>
+      <input placeholder="CSS 셀렉터" value="${escapeHtml(s.selector || '')}" onchange="updateStep(${i},'selector',this.value)">
+      <input placeholder="값 (URL, 날짜, 텍스트)" value="${escapeHtml(s.value || '')}" onchange="updateStep(${i},'value',this.value)">
+      <input placeholder="ms" type="number" value="${s.wait_after || 500}" onchange="updateStep(${i},'wait_after',+this.value)" style="width:70px;">
+      <button onclick="removeStep(${i})" style="background:none; border:none; color:#dc2626; cursor:pointer; font-size:1.1rem;">✕</button>
+    </div>
+  `).join('');
+}
+
+function addStep() {
+  currentSteps.push({action: 'click', selector: '', value: '', wait_after: 500, order: currentSteps.length});
+  renderStepBuilder();
+}
+
+function removeStep(idx) {
+  currentSteps.splice(idx, 1);
+  renderStepBuilder();
+}
+
+function updateStep(idx, field, value) {
+  currentSteps[idx][field] = value;
+}
+
+async function saveSteps() {
+  if (!currentTask) return;
+  try {
+    await API.put(`/api/automation/tasks/${currentTask.id}/update_steps/`, {
+      steps: currentSteps.map((s, i) => ({
+        action: s.action, selector: s.selector || '',
+        value: s.value || '', wait_after: s.wait_after || 500,
+        description: s.description || '',
+      }))
+    });
+    showToast('스텝 저장 완료', 'success');
+    loadTasks();
+  } catch(e) {
+    showToast('스텝 저장 실패', 'error');
+  }
+}
+
+// ===== 실행 =====
+async function runTask() {
+  if (!currentTask) return;
+  const btn = document.getElementById('btn-run');
+  btn.disabled = true;
+  btn.textContent = '⏳ 실행 중...';
+  try {
+    const result = await API.post(`/api/automation/tasks/${currentTask.id}/run/`);
+    showToast(result.status === 'success' ? '실행 성공!' : `실행 ${result.status}`, result.status === 'success' ? 'success' : 'error');
+    loadRuns(currentTask.id);
+    loadTasks();
+  } catch(e) {
+    showToast('실행 실패: ' + (e.message || ''), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ 실행';
+  }
+}
+
+async function quickRun(taskId) {
+  try {
+    const result = await API.post(`/api/automation/tasks/${taskId}/run/`);
+    showToast(result.status === 'success' ? '실행 성공!' : `실행 ${result.status}`, result.status === 'success' ? 'success' : 'error');
+    loadTasks();
+  } catch(e) {
+    showToast('실행 실패', 'error');
+  }
+}
+
+async function dryRun() {
+  if (!currentTask) return;
+  try {
+    const result = await API.get(`/api/automation/tasks/${currentTask.id}/dry_run/`);
+    const v = result.validation;
+    const logHtml = `
+      <div class="run-log">
+        <div class="log-info">드라이런: ${escapeHtml(result.task_name)}</div>
+        <div class="log-info">URL: ${escapeHtml(result.target_url)}</div>
+        <div class="log-info">기간: ${result.date_range.from} ~ ${result.date_range.to} (${escapeHtml(result.period)})</div>
+        <div class="log-info">스텝: ${result.total_steps}개</div>
+        <div class="log-info">다운로드: ${result.download_format}</div>
+        <br>
+        ${v.valid
+          ? '<div class="log-info">✅ 유효성 검사 통과</div>'
+          : v.issues.map(i => `<div class="log-warning">⚠️ ${escapeHtml(i)}</div>`).join('')
+        }
+      </div>
+    `;
+    document.getElementById('run-list').innerHTML = logHtml + document.getElementById('run-list').innerHTML;
+  } catch(e) {
+    showToast('드라이런 실패', 'error');
+  }
+}
+
+// ===== 실행 기록 =====
+async function loadRuns(taskId) {
+  try {
+    const data = await API.get(`/api/automation/tasks/${taskId}/runs/`);
+    const runs = Array.isArray(data) ? data : data.results || [];
+    const el = document.getElementById('run-list');
+    if (!runs.length) {
+      el.innerHTML = '<p style="color:#9ca3af; font-size:.85rem;">실행 기록이 없습니다.</p>';
+      return;
+    }
+    el.innerHTML = runs.map(r => `
+      <div class="task-card" style="margin-bottom:.75rem; padding:1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
+          <span class="badge badge-${r.status}">${r.status}</span>
+          <span style="font-size:.8rem; color:#6b7280;">
+            ${new Date(r.started_at).toLocaleString('ko')}
+            ${r.duration_ms ? ` · ${(r.duration_ms / 1000).toFixed(1)}초` : ''}
+          </span>
+        </div>
+        ${r.error_message ? `<div style="color:#dc2626; font-size:.85rem; margin-bottom:.5rem;">${escapeHtml(r.error_message)}</div>` : ''}
+        ${r.downloaded_file ? `<a href="/media/${r.downloaded_file}" class="btn btn-sm btn-ghost" download>📥 다운로드</a>` : ''}
+        ${r.log && r.log.length ? `
+          <details style="margin-top:.5rem;">
+            <summary style="cursor:pointer; font-size:.85rem; color:#6b7280;">로그 (${r.log.length}건)</summary>
+            <div class="run-log" style="margin-top:.5rem;">
+              ${r.log.map(l => `<div class="log-${l.level}">[${l.time?.split('T')[1]?.substring(0,8) || ''}] ${escapeHtml(l.message)}</div>`).join('')}
+            </div>
+          </details>
+        ` : ''}
+      </div>
+    `).join('');
+  } catch(e) {
+    console.error('loadRuns error:', e);
+  }
+}
+
+// ===== 삭제 =====
+async function deleteTask(taskId) {
+  if (!confirm('이 작업을 삭제하시겠습니까?')) return;
+  try {
+    await API.delete(`/api/automation/tasks/${taskId}/`);
+    showToast('삭제됨', 'success');
+    if (currentTask?.id === taskId) closeDetail();
+    loadTasks();
+  } catch(e) {
+    showToast('삭제 실패', 'error');
+  }
+}
+
+// ===== 유틸 =====
+function openModal() { document.getElementById('modal-overlay').style.display = 'flex'; }
+function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
+</script>
+{% endblock %}
