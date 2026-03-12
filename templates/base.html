@@ -56,6 +56,14 @@
       <header class="top-bar">
         <button class="menu-toggle" id="menu-toggle">☰</button>
         <h2 class="page-title">{% block page_title %}대시보드{% endblock %}</h2>
+        <div class="top-bar-search" style="flex:1; max-width:400px; margin:0 1rem;">
+          <div style="position:relative;">
+            <input type="text" id="global-search" placeholder="문서·리포트 검색…"
+              style="width:100%; padding:6px 12px 6px 32px; border:1px solid var(--border); border-radius:6px; font-size:13px; background:var(--bg-secondary);">
+            <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:14px; opacity:.5;">🔍</span>
+            <div id="search-results" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--bg); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.12); max-height:360px; overflow-y:auto; z-index:999; margin-top:4px;"></div>
+          </div>
+        </div>
         <div class="top-bar-actions">
           {% block top_actions %}{% endblock %}
         </div>
@@ -83,6 +91,41 @@
 
   <script src="{% static 'js/api.js' %}"></script>
   <script src="{% static 'js/app.js' %}"></script>
+  <script>
+  // 글로벌 검색
+  (function(){
+    const input = document.getElementById('global-search');
+    const box = document.getElementById('search-results');
+    if (!input) return;
+    let timer;
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 2) { box.style.display='none'; return; }
+      timer = setTimeout(async () => {
+        try {
+          const data = await API.get(`/api/documents/search/?q=${encodeURIComponent(q)}`);
+          if (!data.results.length) {
+            box.innerHTML = '<div style="padding:12px; color:var(--text-secondary); font-size:13px;">검색 결과 없음</div>';
+          } else {
+            box.innerHTML = data.results.map(r => `
+              <a href="${r.url}" style="display:block; padding:10px 14px; border-bottom:1px solid var(--border); text-decoration:none; color:var(--text);">
+                <div style="font-size:13px; font-weight:500;">${r.title}</div>
+                <div style="font-size:11px; color:var(--text-secondary);">${r.subtitle}${r.snippet ? ' — '+r.snippet : ''}</div>
+              </a>
+            `).join('');
+          }
+          box.style.display = 'block';
+        } catch(e) { box.style.display='none'; }
+      }, 300);
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#global-search') && !e.target.closest('#search-results')) {
+        box.style.display = 'none';
+      }
+    });
+  })();
+  </script>
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>

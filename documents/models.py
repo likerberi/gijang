@@ -9,6 +9,7 @@ class Document(models.Model):
     """업로드된 문서 모델"""
     FILE_TYPE_CHOICES = [
         ('excel', '엑셀'),
+        ('csv', 'CSV'),
         ('image', '이미지'),
         ('pdf', 'PDF'),
     ]
@@ -24,7 +25,7 @@ class Document(models.Model):
                             related_name='documents', verbose_name='업로드 사용자')
     file = models.FileField('파일', upload_to='documents/%Y/%m/%d/',
                            validators=[FileExtensionValidator(
-                               allowed_extensions=['xlsx', 'xls', 'pdf', 'jpg', 'jpeg', 'png']
+                               allowed_extensions=['xlsx', 'xls', 'csv', 'pdf', 'jpg', 'jpeg', 'png']
                            )])
     file_type = models.CharField('파일 유형', max_length=10, choices=FILE_TYPE_CHOICES)
     file_size = models.IntegerField('파일 크기(bytes)', default=0)

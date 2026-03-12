@@ -6,13 +6,17 @@
 
 ## 주요 기능
 
-- 📤 **파일 업로드**: Excel, 이미지, PDF 파일 업로드 지원
+- 📤 **파일 업로드**: Excel, CSV, 이미지, PDF 파일 업로드 지원
 - 🔐 **사용자 인증**: JWT 기반 사용자 인증 및 권한 관리
-- ⚙️ **백그라운드 처리**: Celery를 활용한 비동기 문서 처리
+- ⚙️ **백그라운드 처리**: Celery를 활용한 비동기 문서 처리 (동기 폴백 지원)
 - 📊 **정보 추출**: 업로드된 문서에서 핵심 정보 자동 추출
 - 📝 **리포트 생성**: 추출된 정보를 기반으로 구조화된 리포트 자동 생성
 - 🔗 **다중 엑셀 병합**: 서로 다른 양식의 엑셀 파일을 열 매핑으로 하나로 통합
 - 📋 **매핑 템플릿**: 자주 쓰는 열 매핑 규칙을 저장하여 재사용
+- 🖼️ **OCR 텍스트 추출**: 이미지에서 한국어/영어 텍스트 자동 인식 (pytesseract)
+- 🔍 **통합 검색**: 문서맅·추출 텍스트·리포트 통합 검색
+- 📧 **이메일 알림**: 문서 처리 완료/실패 시 이메일 알림
+- 🤖 **웹 자동화**: Playwright 기반 웹 반복작업 자동화 (엑셀 다운로드 등)
 - 📚 **API 문서**: Swagger UI를 통한 API 문서 자동 생성
 
 ## 기술 스택
@@ -25,8 +29,11 @@
 - **Documentation**: drf-spectacular (Swagger UI)
 - **File Processing**: 
   - Excel: openpyxl
+  - CSV: Python 표준 csv 모듈
   - PDF: PyPDF2
   - Image: Pillow
+  - OCR: pytesseract (선택 의존성)
+- **Browser Automation**: Playwright (선택 의존성)
 
 ## 프로젝트 구조
 
@@ -52,12 +59,18 @@ gijang/
 │       ├── header_detector.py  # 헤더 행 자동 탐지
 │       ├── column_mapper.py    # 열 이름 자동 매핑
 │       └── merge_service.py    # 병합 오케스트레이션
+├── automation/            # 웹 자동화 앱
+│   ├── models.py          # AutomationTask, Step, Run
+│   ├── views.py           # 작업 CRUD + 실행/드라이런/프리셋
+│   ├── engine.py          # Playwright 브라우저 엔진
+│   └── urls.py
 ├── templates/             # 프론트엔드 HTML
 │   ├── base.html          # 공통 레이아웃 (사이드바)
 │   ├── login.html         # 회원가입/로그인
 │   ├── dashboard.html     # 대시보드
 │   ├── documents.html     # 문서 관리
 │   ├── merge.html         # 파일 병합 워크플로우
+│   ├── automation.html    # 웹 자동화
 │   ├── mapping_templates.html  # 매핑 템플릿
 │   └── guide.html         # 사용 가이드
 ├── static/                # 정적 파일
@@ -225,6 +238,23 @@ python manage.py runserver
 - `GET /api/documents/mapping-templates/{id}/` - 템플릿 상세
 - `DELETE /api/documents/mapping-templates/{id}/` - 템플릿 삭제
 
+### 통합 검색
+
+- `GET /api/documents/search/?q=검색어` - 문서·추출텍스트·리포트 통합 검색
+- `GET /api/documents/search/?q=검색어&type=documents` - 문서만 검색
+- `GET /api/documents/search/?q=검색어&type=reports` - 리포트만 검색
+
+### 웹 자동화
+
+- `GET /api/automation/tasks/` - 자동화 작업 목록
+- `POST /api/automation/tasks/` - 작업 생성
+- `GET /api/automation/tasks/{id}/` - 작업 상세
+- `POST /api/automation/tasks/{id}/run/` - 작업 실행
+- `GET /api/automation/tasks/{id}/runs/` - 실행 기록
+- `PUT /api/automation/tasks/{id}/update_steps/` - 스텝 교체
+- `GET /api/automation/tasks/{id}/dry_run/` - 드라이런 (검증만)
+- `GET /api/automation/tasks/presets/` - 프리셋 템플릿
+
 ### 웹 프론트엔드
 
 | 페이지 | URL | 설명 |
@@ -234,6 +264,7 @@ python manage.py runserver
 | 문서 관리 | `/app/documents/` | 파일 업로드/조회 |
 | 파일 병합 | `/app/merge/` | 병합 워크플로우 |
 | 매핑 템플릿 | `/app/templates/` | 재사용 규칙 |
+| 웹 자동화 | `/app/automation/` | Playwright 웹 작업 자동화 |
 | 사용 가이드 | `/guide/` | 사용법 안내 |
 
 ### API 문서
@@ -348,12 +379,8 @@ Celery worker 터미널에서 실시간 로그를 확인할 수 있습니다.
 
 ## 다음 단계
 
-- [ ] OCR 기능 추가 (pytesseract)
-- [ ] CSV 파일 지원
-- [ ] AI 기반 정보 추출 (OpenAI API 등)
-- [ ] 이메일 알림 기능
-- [ ] 문서 검색 기능
-- [ ] Docker 컨테이너화
+- [ ] AI 기반 정보 추출 (OpenAI API 등) — 보류
+- [ ] Docker 컨테이너화 — 보류
 
 ## 라이선스
 

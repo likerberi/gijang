@@ -7,6 +7,40 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _send_document_notification(document, success=True):
+    """문서 처리 완료/실패 이메일 알림"""
+    if not document.user.email:
+        return
+    try:
+        from django.core.mail import send_mail
+        from django.conf import settings
+        if success:
+            subject = f'[기장] 문서 처리 완료: {document.original_filename}'
+            message = (
+                f'{document.user.username}님,\n\n'
+                f'"{document.original_filename}" 파일 처리가 완료되었습니다.\n'
+                f'파일 유형: {document.get_file_type_display()}\n'
+                f'처리 시각: {document.processed_at}\n\n'
+                f'대시보드에서 결과를 확인하세요.'
+            )
+        else:
+            subject = f'[기장] 문서 처리 실패: {document.original_filename}'
+            message = (
+                f'{document.user.username}님,\n\n'
+                f'"{document.original_filename}" 파일 처리 중 오류가 발생했습니다.\n'
+                f'오류: {document.error_message}\n\n'
+                f'파일을 확인 후 다시 시도해 주세요.'
+            )
+        send_mail(
+            subject, message,
+            settings.DEFAULT_FROM_EMAIL,
+            [document.user.email],
+            fail_silently=True,
+        )
+    except Exception as e:
+        logger.warning(f"알림 이메일 발송 실패: {e}")
+
+
 @shared_task(bind=True, max_retries=3)
 def process_document(self, document_id):
     """문서 처리 태스크"""
@@ -18,6 +52,8 @@ def process_document(self, document_id):
         # 파일 유형에 따라 처리
         if document.file_type == 'excel':
             result = process_excel(document)
+        elif document.file_type == 'csv':
+            result = process_csv(document)
         elif document.file_type == 'image':
             result = process_image(document)
         elif document.file_type == 'pdf':
@@ -39,6 +75,9 @@ def process_document(self, document_id):
         # 리포트 생성
         generate_report.delay(document_id)
         
+        # 이메일 알림
+        _send_document_notification(document, success=True)
+        
         logger.info(f"문서 처리 완료: {document.original_filename}")
         return {'status': 'success', 'document_id': document_id}
         
@@ -50,6 +89,9 @@ def process_document(self, document_id):
         document.status = 'failed'
         document.error_message = str(e)
         document.save()
+        
+        # 실패 알림
+        _send_document_notification(document, success=False)
         
         # 재시도
         raise self.retry(exc=e, countdown=60)
@@ -314,8 +356,131 @@ def process_excel(document):
         raise
 
 
+def process_csv(document):
+    """CSV 파일 처리 — 엑셀과 동일한 전처리 파이프라인 적용"""
+    import csv
+    from .utils.header_detector import HeaderDetector
+    from .utils.column_mapper import ColumnMapper
+    from .utils.normalizers import DateNormalizer, NumberNormalizer
+
+    try:
+        # 인코딩 감지 (UTF-8 → EUC-KR 폴백)
+        file_path = document.file.path
+        for encoding in ('utf-8-sig', 'utf-8', 'euc-kr', 'cp949'):
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    sample = f.read(4096)
+                break
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        else:
+            encoding = 'utf-8'
+
+        with open(file_path, 'r', encoding=encoding) as f:
+            # 구분자 자동 감지
+            dialect = csv.Sniffer().sniff(f.read(4096))
+            f.seek(0)
+            reader = csv.reader(f, dialect)
+            raw_rows = [row for row in reader]
+
+        if not raw_rows:
+            return {
+                'extracted_text': '',
+                'structured_data': {'headers': [], 'rows': []},
+                'total_rows': 0,
+                'metadata': {'encoding': encoding},
+            }
+
+        # HeaderDetector / ColumnMapper / Normalizer 재사용
+        detector = HeaderDetector()
+        headers, data_rows, meta_info = detector.extract_data_with_header(raw_rows)
+
+        mapper = ColumnMapper()
+        mapped_headers = []
+        mapping_log = {}
+        for h in headers:
+            standard_name, confidence = mapper.map_column(h)
+            if confidence > 0.5:
+                mapped_headers.append(standard_name)
+                if standard_name != h:
+                    mapping_log[h] = {'mapped_to': standard_name, 'confidence': round(confidence, 2)}
+            else:
+                mapped_headers.append(h)
+
+        date_normalizer = DateNormalizer(output_format='%Y-%m-%d')
+        number_normalizer = NumberNormalizer()
+
+        # 날짜/숫자 열 감지 (첫 50행 샘플링)
+        date_col_indices = set()
+        number_col_indices = set()
+        for col_idx in range(len(mapped_headers)):
+            date_count = number_count = total_non_empty = 0
+            for row in data_rows[:50]:
+                if col_idx >= len(row) or not row[col_idx]:
+                    continue
+                val = str(row[col_idx]).strip()
+                if not val:
+                    continue
+                total_non_empty += 1
+                if date_normalizer.normalize(val) is not None:
+                    date_count += 1
+                elif number_normalizer.normalize(val) is not None:
+                    number_count += 1
+            if total_non_empty > 0:
+                if date_count / total_non_empty > 0.5:
+                    date_col_indices.add(col_idx)
+                elif number_count / total_non_empty > 0.5:
+                    number_col_indices.add(col_idx)
+
+        # 정규화 적용
+        normalized_rows = []
+        for row in data_rows:
+            new_row = list(row)
+            while len(new_row) < len(mapped_headers):
+                new_row.append(None)
+            for ci in date_col_indices:
+                if ci < len(new_row) and new_row[ci]:
+                    n = date_normalizer.normalize(new_row[ci])
+                    if n is not None:
+                        new_row[ci] = n
+            for ci in number_col_indices:
+                if ci < len(new_row) and new_row[ci]:
+                    n = number_normalizer.normalize(new_row[ci])
+                    if n is not None:
+                        new_row[ci] = n
+            if any(cell is not None and str(cell).strip() != '' for cell in new_row[:len(mapped_headers)]):
+                normalized_rows.append(new_row)
+
+        structured_data = {
+            'headers': mapped_headers,
+            'original_headers': headers,
+            'rows': normalized_rows,
+        }
+
+        preprocessing_info = {
+            'header_row_detected': meta_info['header_row_index'],
+            'column_mapping': mapping_log,
+            'date_columns': [mapped_headers[i] for i in date_col_indices if i < len(mapped_headers)],
+            'number_columns': [mapped_headers[i] for i in number_col_indices if i < len(mapped_headers)],
+            'encoding': encoding,
+            'delimiter': dialect.delimiter,
+            'rows_before_cleanup': len(data_rows),
+            'rows_after_cleanup': len(normalized_rows),
+        }
+
+        return {
+            'extracted_text': '',
+            'structured_data': structured_data,
+            'total_rows': len(normalized_rows),
+            'metadata': {'preprocessing': preprocessing_info},
+        }
+    except Exception as e:
+        logger.error(f"CSV 처리 오류: {str(e)}")
+        raise
+
+
 def process_image(document):
-    """이미지 파일 처리"""
+    """이미지 파일 처리 — OCR 텍스트 추출 포함"""
     try:
         from PIL import Image
         
@@ -330,12 +495,37 @@ def process_image(document):
             'height': img.height,
         }
         
-        # OCR이 필요한 경우 여기에 구현
-        # pytesseract 등을 사용하여 텍스트 추출
+        # OCR 텍스트 추출 (pytesseract 설치 시)
+        extracted_text = ''
+        ocr_available = False
+        try:
+            import pytesseract
+            # 한국어 + 영어 OCR
+            extracted_text = pytesseract.image_to_string(img, lang='kor+eng')
+            ocr_available = True
+            metadata['ocr_engine'] = 'tesseract'
+            metadata['ocr_lang'] = 'kor+eng'
+        except ImportError:
+            logger.info("pytesseract 미설치 — OCR 건너뜀")
+            metadata['ocr_engine'] = None
+            metadata['ocr_note'] = 'pytesseract 미설치. pip install pytesseract 후 tesseract 바이너리 필요'
+        except Exception as e:
+            logger.warning(f"OCR 실패: {e}")
+            metadata['ocr_error'] = str(e)
+        
+        # OCR 텍스트에서 간단한 구조화 시도 (줄 단위)
+        structured_data = {}
+        if extracted_text.strip():
+            lines = [line.strip() for line in extracted_text.split('\n') if line.strip()]
+            structured_data = {
+                'lines': lines,
+                'line_count': len(lines),
+                'char_count': len(extracted_text),
+            }
         
         return {
-            'extracted_text': '',  # OCR 결과가 들어갈 자리
-            'structured_data': {},
+            'extracted_text': extracted_text,
+            'structured_data': structured_data,
             'metadata': metadata,
         }
     except Exception as e:

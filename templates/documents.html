@@ -116,12 +116,13 @@ document.getElementById('btn-upload').addEventListener('click', () => {
     <form id="upload-form">
       <div class="form-group">
         <label>파일 선택</label>
-        <input type="file" id="upload-file" accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png" required>
+        <input type="file" id="upload-file" accept=".xlsx,.xls,.csv,.pdf,.jpg,.jpeg,.png" required>
       </div>
       <div class="form-group">
         <label>파일 유형</label>
         <select id="upload-type" class="form-select" required>
           <option value="excel">엑셀</option>
+          <option value="csv">CSV</option>
           <option value="pdf">PDF</option>
           <option value="image">이미지</option>
         </select>

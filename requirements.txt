@@ -11,3 +11,7 @@ django-cors-headers>=4.0.0
 djangorestframework-simplejwt>=5.2.0
 drf-spectacular>=0.26.0
 django-filter>=23.0
+
+# 선택 의존성 (필요 시 주석 해제)
+# pytesseract>=0.3.10    # OCR — brew install tesseract 필요
+# playwright>=1.40.0     # 웹 자동화 — playwright install chromium 필요
