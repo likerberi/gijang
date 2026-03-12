@@ -4,11 +4,15 @@
 엑셀, 이미지, PDF 파일을 업로드하여 핵심 정보를 추출하고 구조화된 리포트를 생성하는 내부 API 서비스
 
 ## 주요 기능
-- 파일 업로드 (Excel, 이미지, PDF)
+- 파일 업로드 (Excel, CSV, 이미지, PDF)
 - 사용자 인증 및 권한 관리
-- Celery 백그라운드 태스크 처리
+- Celery 백그라운드 태스크 처리 (동기 폴백 지원)
 - 문서 정보 추출 및 구조화된 리포트 생성
 - **다중 엑셀 파일 병합** (열 매핑, 헤더 탐지, 날짜/숫자 정규화)
+- **OCR 텍스트 추출** (pytesseract, 선택 의존성)
+- **통합 문서 검색** (파일명/추출텍스트/리포트)
+- **이메일 알림** (문서 처리 완료/실패 시)
+- **웹 자동화** (Playwright 기반 브라우저 자동화)
 
 ## 기술 스택
 - Django REST Framework
@@ -22,7 +26,9 @@
 - `users/` - 사용자 인증 및 관리
 - `documents/` - 문서 업로드, 처리, 리포트 생성
 - `documents/utils/` - 데이터 정규화 유틸리티 (날짜, 숫자, 헤더 탐지, 열 매핑)
+- `automation/` - 웹 자동화 앱 (Playwright 엔진, 스텝 빌더)
 - `fastapi_app/` - FastAPI 버전 API
+- `templates/` - 프론트엔드 HTML 템플릿
 
 ## 진행 상황
 - [x] copilot-instructions.md 파일 생성
@@ -39,6 +45,11 @@
 - [x] 열 매핑 / 헤더 탐지 / 날짜·숫자 정규화 유틸리티
 - [x] 매핑 템플릿 재사용 기능
 - [x] FastAPI 측 병합 API 추가
+- [x] OCR 기능 추가 (pytesseract, 선택 의존성)
+- [x] CSV 파일 지원
+- [x] 이메일 알림 기능
+- [x] 문서 검색 기능 (통합 검색 API + UI)
+- [x] 웹 자동화 앱 (automation)
 
 ## 실행 방법
 
@@ -70,8 +81,10 @@ python manage.py createsuperuser
 - `/api/users/register/` - 사용자 등록
 - `/api/users/login/` - 로그인
 - `/api/documents/documents/` - 문서 업로드 및 관리
+- `/api/documents/search/?q=` - 통합 검색
 - `/api/documents/merge-projects/` - 파일 병합 프로젝트 관리
 - `/api/documents/mapping-templates/` - 매핑 템플릿 관리
+- `/api/automation/tasks/` - 웹 자동화 작업 관리
 - `/admin/` - Django 관리자 페이지
 
 ## 개발 노트

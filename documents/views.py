@@ -1685,3 +1685,86 @@ def tax_calendar_api(request):
         'next_event': upcoming[0] if upcoming else None,
         'upcoming_count': len([e for e in upcoming if e['days_until'] <= 30]),
     })
+
+
+@api_view(['GET'])
+@perm_classes([IsAuth])
+def document_search_api(request):
+    """통합 문서 검색 API
+
+    쿼리 파라미터:
+    - q: 검색어 (필수)
+    - type: 필터 — documents / reports / all (기본 all)
+    """
+    from django.db.models import Q
+
+    q = request.query_params.get('q', '').strip()
+    if not q:
+        return Response({'error': '검색어(q)를 입력하세요.'}, status=400)
+
+    search_type = request.query_params.get('type', 'all')
+    results = []
+
+    # 문서 검색 (파일명, 오류메시지)
+    if search_type in ('all', 'documents'):
+        docs = Document.objects.filter(
+            user=request.user
+        ).filter(
+            Q(original_filename__icontains=q) | Q(error_message__icontains=q)
+        )[:20]
+        for d in docs:
+            results.append({
+                'type': 'document',
+                'id': d.id,
+                'title': d.original_filename,
+                'subtitle': f'{d.get_file_type_display()} · {d.get_status_display()}',
+                'date': d.created_at.isoformat(),
+                'url': f'/app/documents/{d.id}/',
+            })
+
+    # 추출 텍스트 검색
+    if search_type in ('all', 'documents'):
+        extracted_qs = ExtractedData.objects.filter(
+            document__user=request.user,
+            extracted_text__icontains=q,
+        ).select_related('document')[:10]
+        seen_doc_ids = {r['id'] for r in results if r['type'] == 'document'}
+        for ex in extracted_qs:
+            if ex.document_id in seen_doc_ids:
+                continue
+            # 매칭 부분 발췌
+            text = ex.extracted_text
+            idx = text.lower().find(q.lower())
+            snippet = text[max(0, idx - 40):idx + len(q) + 40] if idx >= 0 else ''
+            results.append({
+                'type': 'extracted',
+                'id': ex.document_id,
+                'title': ex.document.original_filename,
+                'subtitle': f'추출 텍스트에서 발견',
+                'snippet': f'…{snippet}…' if snippet else '',
+                'date': ex.document.created_at.isoformat(),
+                'url': f'/app/documents/{ex.document_id}/',
+            })
+
+    # 리포트 검색
+    if search_type in ('all', 'reports'):
+        reports = Report.objects.filter(
+            document__user=request.user
+        ).filter(
+            Q(title__icontains=q) | Q(summary__icontains=q)
+        ).select_related('document')[:10]
+        for r in reports:
+            results.append({
+                'type': 'report',
+                'id': r.id,
+                'title': r.title,
+                'subtitle': r.summary[:80] if r.summary else '',
+                'date': r.created_at.isoformat(),
+                'url': f'/app/documents/{r.document_id}/',
+            })
+
+    return Response({
+        'query': q,
+        'total': len(results),
+        'results': results,
+    })

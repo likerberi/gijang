@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     DocumentViewSet, ExtractedDataViewSet, ReportViewSet,
     MergeProjectViewSet, ColumnMappingTemplateViewSet,
-    VendorViewSet, tax_calendar_api,
+    VendorViewSet, tax_calendar_api, document_search_api,
 )
 
 router = DefaultRouter()
@@ -17,4 +17,5 @@ router.register(r'vendors', VendorViewSet, basename='vendor')
 urlpatterns = [
     path('', include(router.urls)),
     path('tax-calendar/', tax_calendar_api, name='tax-calendar'),
+    path('search/', document_search_api, name='document-search'),
 ]
