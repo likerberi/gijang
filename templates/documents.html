@@ -13,8 +13,9 @@
   <select id="filter-type" class="form-select">
     <option value="">전체 유형</option>
     <option value="excel">엑셀</option>
+    <option value="csv">CSV</option>
     <option value="pdf">PDF</option>
-    <option value="image">이미지</option>
+    <option value="image">이미지 (OCR)</option>
   </select>
   <select id="filter-status" class="form-select">
     <option value="">전체 상태</option>
@@ -74,13 +75,13 @@ async function loadDocuments(page = 1) {
       tbody.innerHTML = results.map(d => `
         <tr>
           <td><strong>${escapeHtml(d.original_filename)}</strong></td>
-          <td><span class="badge badge-type">${d.file_type}</span></td>
+          <td><span class="badge badge-type">${d.file_type === 'image' ? '🔍 이미지(OCR)' : d.file_type}</span></td>
           <td>${statusBadge(d.status)}</td>
           <td>${formatSize(d.file_size)}</td>
           <td>${formatDate(d.created_at)}</td>
           <td class="actions">
-            ${d.status === 'completed' ? `<a href="/app/documents/${d.id}/" class="btn btn-xs btn-primary">📊 거래내역</a>` : ''}
-            ${d.status === 'completed' ? `<button class="btn btn-xs btn-ghost" onclick="viewExtracted(${d.id})">👁 미리보기</button>` : ''}
+            ${d.status === 'completed' && d.file_type !== 'image' ? `<a href="/app/documents/${d.id}/" class="btn btn-xs btn-primary">📊 거래내역</a>` : ''}
+            ${d.status === 'completed' ? `<button class="btn btn-xs btn-ghost" onclick="viewExtracted(${d.id})">${d.file_type === 'image' ? '🔍 OCR 결과' : '👁 미리보기'}</button>` : ''}
             ${d.status === 'failed' ? `<button class="btn btn-xs btn-ghost" onclick="reprocess(${d.id})">🔄 재처리</button>` : ''}
             <button class="btn btn-xs btn-danger" onclick="deleteDoc(${d.id})">🗑</button>
           </td>
@@ -124,12 +125,32 @@ document.getElementById('btn-upload').addEventListener('click', () => {
           <option value="excel">엑셀</option>
           <option value="csv">CSV</option>
           <option value="pdf">PDF</option>
-          <option value="image">이미지</option>
+          <option value="image">이미지 (OCR 텍스트 추출)</option>
         </select>
+      </div>
+      <div id="upload-ocr-hint" style="display:none; padding:10px; background:#eff6ff; border-radius:6px; font-size:13px; margin-bottom:12px;">
+        🔍 <strong>OCR 자동 인식</strong> — 이미지의 텍스트를 자동으로 추출합니다.<br>
+        <span style="color:#6b7280; font-size:12px;">영수증, 세금계산서, 스캔 문서 등에 사용하세요. 한국어+영어 지원.</span>
       </div>
       <button type="submit" class="btn btn-primary btn-full">업로드</button>
     </form>
   `);
+
+  // 파일 선택 시 유형 자동 감지
+  document.getElementById('upload-file').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    const sel = document.getElementById('upload-type');
+    const hint = document.getElementById('upload-ocr-hint');
+    if (['xlsx','xls'].includes(ext)) { sel.value = 'excel'; hint.style.display = 'none'; }
+    else if (ext === 'csv') { sel.value = 'csv'; hint.style.display = 'none'; }
+    else if (ext === 'pdf') { sel.value = 'pdf'; hint.style.display = 'none'; }
+    else if (['jpg','jpeg','png'].includes(ext)) { sel.value = 'image'; hint.style.display = 'block'; }
+  });
+  document.getElementById('upload-type').addEventListener('change', (e) => {
+    document.getElementById('upload-ocr-hint').style.display = e.target.value === 'image' ? 'block' : 'none';
+  });
 
   document.getElementById('upload-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -155,13 +176,42 @@ document.getElementById('btn-upload').addEventListener('click', () => {
 async function viewExtracted(docId) {
   try {
     const data = await API.get(`/api/documents/documents/${docId}/extracted_data/`);
-    showModal('추출 데이터', `
-      <div class="detail-grid">
-        <div class="detail-item"><span class="detail-label">총 행 수</span><span class="detail-value">${data.total_rows || 0}</span></div>
-        <div class="detail-item"><span class="detail-label">총 페이지</span><span class="detail-value">${data.total_pages || 0}</span></div>
-        <div class="detail-item"><span class="detail-label">텍스트 길이</span><span class="detail-value">${(data.extracted_text || '').length.toLocaleString()}자</span></div>
-      </div>
-      ${data.structured_data && data.structured_data.headers ? `
+    const meta = data.metadata || {};
+    const ocrEngine = meta.ocr_engine;
+    const isOCR = ocrEngine && ocrEngine !== 'none';
+
+    let html = '<div class="detail-grid">';
+    if (data.total_rows) html += `<div class="detail-item"><span class="detail-label">총 행 수</span><span class="detail-value">${data.total_rows}</span></div>`;
+    if (data.total_pages) html += `<div class="detail-item"><span class="detail-label">총 페이지</span><span class="detail-value">${data.total_pages}</span></div>`;
+    const textLen = (data.extracted_text || '').length;
+    if (textLen) html += `<div class="detail-item"><span class="detail-label">텍스트 길이</span><span class="detail-value">${textLen.toLocaleString()}자</span></div>`;
+    html += '</div>';
+
+    // OCR 결과 표시
+    if (isOCR) {
+      const conf = meta.ocr_confidence ? (meta.ocr_confidence * 100).toFixed(1) + '%' : '-';
+      html += `
+        <div style="margin-top:1rem; padding:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px;">
+          <strong>🔍 OCR 결과</strong>
+          <span style="float:right; font-size:12px; color:#6b7280;">엔진: ${ocrEngine} · 언어: ${meta.ocr_lang || '-'} · 신뢰도: ${conf}</span>
+        </div>`;
+    } else if (meta.ocr_note) {
+      html += `
+        <div style="margin-top:1rem; padding:12px; background:#fefce8; border:1px solid #fde68a; border-radius:8px; font-size:13px;">
+          ⚠️ ${meta.ocr_note}
+        </div>`;
+    }
+
+    // 추출된 텍스트 (OCR 또는 PDF)
+    if (data.extracted_text && data.extracted_text.trim()) {
+      html += `
+        <h4 style="margin-top:1rem;">추출된 텍스트</h4>
+        <pre style="max-height:250px; overflow:auto; padding:12px; background:var(--bg-secondary); border-radius:6px; font-size:13px; white-space:pre-wrap; word-break:break-all;">${escapeHtml(data.extracted_text.substring(0, 3000))}${data.extracted_text.length > 3000 ? '\n\n... (3,000자까지만 표시)' : ''}</pre>`;
+    }
+
+    // 구조화 데이터 (엑셀/CSV)
+    if (data.structured_data && data.structured_data.headers) {
+      html += `
         <h4 style="margin-top:1rem;">구조화 데이터</h4>
         <div class="table-wrap" style="max-height:300px; overflow:auto;">
           <table class="table table-sm">
@@ -171,9 +221,24 @@ async function viewExtracted(docId) {
             ).join('')}</tbody>
           </table>
           ${(data.structured_data.rows || []).length > 20 ? '<p class="text-muted">... 처음 20행만 표시</p>' : ''}
-        </div>
-      ` : ''}
-    `);
+        </div>`;
+    }
+
+    // OCR 영역 정보 (EasyOCR/PaddleOCR)
+    if (data.structured_data && data.structured_data.regions && data.structured_data.regions.length) {
+      html += `
+        <h4 style="margin-top:1rem;">인식 영역 (${data.structured_data.regions.length}개)</h4>
+        <div style="max-height:200px; overflow:auto;">
+          <table class="table table-sm">
+            <thead><tr><th>#</th><th>텍스트</th><th>신뢰도</th></tr></thead>
+            <tbody>${data.structured_data.regions.slice(0, 50).map((r, i) =>
+              `<tr><td>${i+1}</td><td>${escapeHtml(r.text)}</td><td>${(r.confidence*100).toFixed(1)}%</td></tr>`
+            ).join('')}</tbody>
+          </table>
+        </div>`;
+    }
+
+    showModal('추출 데이터', html);
   } catch (err) {
     showToast('데이터를 불러올 수 없습니다', 'error');
   }
