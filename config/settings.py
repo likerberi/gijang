@@ -214,6 +214,12 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='기장 알림 <noreply@gijang.local>')
 
+# OCR Configuration
+# 'tesseract' (기본) | 'easyocr' | 'paddleocr'
+# 지정한 백엔드가 미설치이면 설치된 것으로 자동 폴백
+OCR_BACKEND = config('OCR_BACKEND', default='tesseract')
+OCR_LANG = config('OCR_LANG', default='kor+eng')
+
 # File Upload Settings
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 ALLOWED_FILE_TYPES = [

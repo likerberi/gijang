@@ -480,12 +480,13 @@ def process_csv(document):
 
 
 def process_image(document):
-    """이미지 파일 처리 — OCR 텍스트 추출 포함"""
+    """이미지 파일 처리 — OCR 추상화 레이어 사용"""
     try:
         from PIL import Image
-        
+        from .utils.ocr import extract_text
+
         img = Image.open(document.file.path)
-        
+
         # 이미지 정보 추출
         metadata = {
             'format': img.format,
@@ -494,37 +495,32 @@ def process_image(document):
             'width': img.width,
             'height': img.height,
         }
-        
-        # OCR 텍스트 추출 (pytesseract 설치 시)
-        extracted_text = ''
-        ocr_available = False
-        try:
-            import pytesseract
-            # 한국어 + 영어 OCR
-            extracted_text = pytesseract.image_to_string(img, lang='kor+eng')
-            ocr_available = True
-            metadata['ocr_engine'] = 'tesseract'
-            metadata['ocr_lang'] = 'kor+eng'
-        except ImportError:
-            logger.info("pytesseract 미설치 — OCR 건너뜀")
-            metadata['ocr_engine'] = None
-            metadata['ocr_note'] = 'pytesseract 미설치. pip install pytesseract 후 tesseract 바이너리 필요'
-        except Exception as e:
-            logger.warning(f"OCR 실패: {e}")
-            metadata['ocr_error'] = str(e)
-        
-        # OCR 텍스트에서 간단한 구조화 시도 (줄 단위)
+
+        # OCR 텍스트 추출 (설치된 백엔드 자동 선택)
+        ocr_result = extract_text(document.file.path)
+        metadata.update({
+            'ocr_engine': ocr_result.engine,
+            'ocr_lang': ocr_result.lang,
+            'ocr_confidence': ocr_result.confidence,
+        })
+
+        if ocr_result.engine == 'none':
+            metadata['ocr_note'] = 'OCR 엔진 미설치. tesseract/easyocr/paddleocr 중 하나 필요'
+
+        # 구조화 데이터
         structured_data = {}
-        if extracted_text.strip():
-            lines = [line.strip() for line in extracted_text.split('\n') if line.strip()]
+        if ocr_result.text:
+            lines = [line.strip() for line in ocr_result.text.split('\n') if line.strip()]
             structured_data = {
                 'lines': lines,
                 'line_count': len(lines),
-                'char_count': len(extracted_text),
+                'char_count': len(ocr_result.text),
             }
-        
+            if ocr_result.regions:
+                structured_data['regions'] = ocr_result.regions
+
         return {
-            'extracted_text': extracted_text,
+            'extracted_text': ocr_result.text,
             'structured_data': structured_data,
             'metadata': metadata,
         }
